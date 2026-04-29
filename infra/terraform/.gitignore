@@ -1,0 +1,13 @@
+# Local Terraform state and lock files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Real variable files (only the .example versions are committed)
+*.tfvars
+!*.tfvars.example
+
+# Crash logs
+crash.log
+crash.*.log

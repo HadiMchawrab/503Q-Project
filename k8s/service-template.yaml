@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: SERVICE_NAME
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: SERVICE_NAME
+  template:
+    metadata:
+      labels:
+        app: SERVICE_NAME
+    spec:
+      containers:
+        - name: SERVICE_NAME
+          image: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/shopcloud-SERVICE_NAME:latest
+          ports:
+            - containerPort: SERVICE_PORT
+          envFrom:
+            - configMapRef:
+                name: shopcloud-config
+            - secretRef:
+                name: shopcloud-secrets
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: SERVICE_NAME
+spec:
+  selector:
+    app: SERVICE_NAME
+  ports:
+    - port: SERVICE_PORT
+      targetPort: SERVICE_PORT
