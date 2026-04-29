@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="ShopCloud premium e-commerce storefront" />
+  <title>ShopCloud | Premium Tech Store</title>
+  <link rel="preconnect" href="https://images.unsplash.com" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="customer-page">
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="ShopCloud home">
+      <span class="brand-mark">SC</span>
+      <span>
+        <strong>ShopCloud</strong>
+        <small>Premium technology store</small>
+      </span>
+    </a>
+
+    <nav class="topnav" aria-label="Primary navigation">
+      <a href="#storefront">Products</a>
+      <a href="#cartSection">Cart</a>
+      <a href="#ordersSection">Orders</a>
+      <a href="#account">Account</a>
+    </nav>
+
+    <div class="topbar-actions">
+      <button class="btn btn-secondary btn-small" id="viewCartBtn" type="button">Cart <span class="count-badge" id="cartBadge">0</span></button>
+      <a class="btn btn-dark btn-small" href="/admin.html">Admin</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-clean">
+      <div class="hero-copy">
+        <span class="eyebrow dark"><span></span> Premium tech store</span>
+        <h1>Premium tech, simple checkout, reliable delivery.</h1>
+        <p class="hero-lead">Shop laptops, phones, monitors, audio gear, accessories, and networking products with clear prices, live stock, and a smoother checkout flow.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#storefront">Start shopping</a>
+          <a class="btn btn-secondary" href="#account">Sign in</a>
+        </div>
+      </div>
+
+      <aside class="hero-card">
+        <div class="hero-card-top">
+          <span class="deal-label">Featured</span>
+          <span class="rating">★ 4.9</span>
+        </div>
+        <img src="https://images.unsplash.com/photo-1517336714731-489689fd1ca8" alt="Premium laptop" />
+        <div>
+          <h2>CloudBook Pro 14</h2>
+          <p>Lightweight, powerful, and ready for work, study, and development.</p>
+          <div class="hero-price-row"><strong>$1,299.00</strong><span>15 in stock</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="benefit-strip" aria-label="Store benefits">
+      <article>
+        <strong>Real-time availability</strong>
+        <span>Know what is in stock before checkout.</span>
+      </article>
+      <article>
+        <strong>Secure customer account</strong>
+        <span>Save your cart and track previous orders.</span>
+      </article>
+      <article>
+        <strong>Fast order confirmation</strong>
+        <span>Checkout is clear, simple, and reliable.</span>
+      </article>
+    </section>
+
+    <section class="account-section" id="account">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow dark"><span></span> Account</span>
+          <h2>Sign in or create your account.</h2>
+        </div>
+        <p>Use one customer account to save your cart and view past orders.</p>
+      </div>
+
+      <div class="account-grid">
+        <aside class="account-status-card">
+          <div class="identity-avatar" id="identityAvatar">SC</div>
+          <div>
+            <small>Current customer</small>
+            <h3 id="sideUserStatus">Browsing as a guest</h3>
+            <p id="sideSessionHint">Sign in or register to add products to your cart and place an order.</p>
+          </div>
+          <button class="btn btn-secondary full-width" id="logoutBtn" type="button">Sign out</button>
+        </aside>
+
+        <div class="auth-card" id="authCard">
+          <div class="auth-tabs" role="tablist" aria-label="Authentication forms">
+            <button class="active" data-auth-tab="loginPanel" type="button">Sign in</button>
+            <button data-auth-tab="registerPanel" type="button">Register</button>
+          </div>
+
+          <div id="loginPanel" class="auth-panel active">
+            <h3>Welcome back</h3>
+            <p class="muted">Use your customer account to continue shopping.</p>
+            <label class="field-label" for="loginEmail">Email</label>
+            <div class="input-shell"><span>@</span><input id="loginEmail" type="email" placeholder="customer@email.com" autocomplete="email" inputmode="email" /></div>
+            <label class="field-label" for="loginPassword">Password</label>
+            <div class="input-shell password-shell"><span>••</span><input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" /><button data-toggle-password="loginPassword" type="button">Show</button></div>
+            <button id="loginBtn" class="btn btn-primary full-width" type="button">Sign in</button>
+            <button id="quickCustomerBtn" class="btn-text" type="button">Use demo customer</button>
+          </div>
+
+          <div id="signedInPanel" class="auth-panel">
+            <h3>Account active</h3>
+            <p class="muted">You are signed in. Continue shopping, review your cart, or place an order when ready.</p>
+            <a class="btn btn-primary full-width" href="#storefront">Continue shopping</a>
+          </div>
+
+          <div id="registerPanel" class="auth-panel">
+            <h3>Create your account</h3>
+            <p class="muted">Create a customer account for cart, checkout, and order tracking.</p>
+            <div class="form-grid two-col">
+              <div>
+                <label class="field-label" for="registerName">Full name</label>
+                <div class="input-shell"><span>ID</span><input id="registerName" placeholder="Mansour Allam" autocomplete="name" /></div>
+              </div>
+              <div>
+                <label class="field-label" for="registerEmail">Email</label>
+                <div class="input-shell"><span>@</span><input id="registerEmail" type="email" placeholder="customer@email.com" autocomplete="email" inputmode="email" /></div>
+              </div>
+              <div>
+                <label class="field-label" for="registerPassword">Password</label>
+                <div class="input-shell password-shell"><span>••</span><input id="registerPassword" type="password" placeholder="Minimum 8 characters" autocomplete="new-password" /><button data-toggle-password="registerPassword" type="button">Show</button></div>
+                <div class="password-meter"><span id="passwordStrengthBar"></span></div>
+              </div>
+              <div>
+                <label class="field-label" for="registerConfirmPassword">Confirm password</label>
+                <div class="input-shell password-shell"><span>✓</span><input id="registerConfirmPassword" type="password" placeholder="Repeat password" autocomplete="new-password" /><button data-toggle-password="registerConfirmPassword" type="button">Show</button></div>
+              </div>
+            </div>
+            <div class="password-checklist" id="passwordChecklist">
+              <span data-rule="length">8+ characters</span>
+              <span data-rule="letter">Letter</span>
+              <span data-rule="number">Number</span>
+            </div>
+            <label class="check-row terms-row"><input id="acceptTerms" type="checkbox" /> <span>I agree to create a demo customer account for this local project.</span></label>
+            <button id="registerBtn" class="btn btn-primary full-width" type="button">Create account</button>
+          </div>
+
+          <div id="message" class="notice">Ready.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="storefront-section" id="storefront">
+      <div class="section-heading">
+        <div>
+          <span class="eyebrow dark"><span></span> Shop</span>
+          <h2>Featured products</h2>
+        </div>
+        <span class="inventory-count" id="productCount">Loading products...</span>
+      </div>
+
+      <div class="commerce-grid">
+        <section class="catalog-pane">
+          <div class="toolbar-card">
+            <div class="search-shell"><span>Search</span><input id="searchInput" placeholder="Search laptops, phones, accessories..." /></div>
+            <select id="categoryFilter" aria-label="Filter by category"><option value="">All categories</option></select>
+            <select id="sortSelect" aria-label="Sort products">
+              <option value="newest">Newest</option>
+              <option value="price-asc">Price low to high</option>
+              <option value="price-desc">Price high to low</option>
+              <option value="name-asc">Name A to Z</option>
+              <option value="stock-desc">Most stock</option>
+            </select>
+            <label class="toggle-filter"><input id="inStockOnly" type="checkbox" /> In stock only</label>
+          </div>
+          <div class="category-chips" id="categoryChips"></div>
+          <div id="products" class="product-grid"></div>
+        </section>
+
+        <aside class="commerce-rail" id="cartSection">
+          <section class="rail-card">
+            <div class="rail-title">
+              <div>
+                <small>Cart</small>
+                <h3>Your selection</h3>
+              </div>
+              <button id="clearCartBtn" class="btn btn-ghost btn-small" type="button">Clear</button>
+            </div>
+            <div id="cart" class="cart-list"></div>
+          </section>
+
+          <section class="rail-card checkout-card">
+            <div class="rail-title">
+              <div>
+                <small>Checkout</small>
+                <h3>Place order</h3>
+              </div>
+              <span class="lock-chip">Stock visible</span>
+            </div>
+            <label class="field-label" for="shippingAddress">Shipping address</label>
+            <textarea id="shippingAddress" rows="4" placeholder="Building, street, city, country">Beirut Digital District, Beirut, Lebanon</textarea>
+            <button id="checkoutBtn" class="btn btn-primary full-width" type="button">Place order</button>
+          </section>
+
+          <section class="rail-card" id="ordersSection">
+            <div class="rail-title">
+              <div>
+                <small>Orders</small>
+                <h3>Order history</h3>
+              </div>
+              <button id="refreshOrdersBtn" class="btn btn-ghost btn-small" type="button">Refresh</button>
+            </div>
+            <div id="orders" class="order-list"></div>
+          </section>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
