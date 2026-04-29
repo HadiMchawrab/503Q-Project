@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 600 460" role="img" aria-label="FocusMax">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#713f12"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+    <radialGradient id="r" cx="70%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="white" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="600" height="460" rx="0" fill="url(#g)"/>
+  <rect width="600" height="460" fill="url(#r)"/>
+  <circle cx="510" cy="70" r="110" fill="white" opacity=".08"/>
+  <circle cx="90" cy="380" r="130" fill="white" opacity=".07"/>
+  <path d="M150 300v-65c0-85 65-145 150-145s150 60 150 145v65" stroke="white" stroke-width="38" fill="none" stroke-linecap="round" opacity=".95"/><rect x="115" y="280" width="86" height="112" rx="28" fill="white" opacity=".95"/><rect x="399" y="280" width="86" height="112" rx="28" fill="white" opacity=".95"/>
+  <text x="42" y="58" fill="white" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="800">FocusMax</text>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 600 460" role="img" aria-label="USB-C Dock">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+    <radialGradient id="r" cx="70%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="white" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="600" height="460" rx="0" fill="url(#g)"/>
+  <rect width="600" height="460" fill="url(#r)"/>
+  <circle cx="510" cy="70" r="110" fill="white" opacity=".08"/>
+  <circle cx="90" cy="380" r="130" fill="white" opacity=".07"/>
+  <rect x="100" y="190" width="400" height="130" rx="28" fill="white" opacity=".94"/><circle cx="170" cy="255" r="18" fill="#0f172a" opacity=".8"/><rect x="225" y="235" width="90" height="40" rx="10" fill="#0f172a" opacity=".8"/><rect x="345" y="235" width="90" height="40" rx="10" fill="#0f172a" opacity=".8"/>
+  <text x="42" y="58" fill="white" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="800">USB-C Dock</text>
+</svg>

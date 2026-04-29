@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 600 460" role="img" aria-label="Nimbus Mini">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4c1d95"/>
+      <stop offset="100%" stop-color="#f43f5e"/>
+    </linearGradient>
+    <radialGradient id="r" cx="70%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="white" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="600" height="460" rx="0" fill="url(#g)"/>
+  <rect width="600" height="460" fill="url(#r)"/>
+  <circle cx="510" cy="70" r="110" fill="white" opacity=".08"/>
+  <circle cx="90" cy="380" r="130" fill="white" opacity=".07"/>
+  <rect x="210" y="70" width="180" height="380" rx="36" fill="white" opacity=".94"/><rect x="230" y="112" width="140" height="288" rx="20" fill="#0f172a" opacity=".9"/><circle cx="300" cy="425" r="12" fill="#cbd5e1"/>
+  <text x="42" y="58" fill="white" font-size="24" font-family="Inter, Arial, sans-serif" font-weight="800">Nimbus Mini</text>
+</svg>
