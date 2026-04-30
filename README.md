@@ -82,6 +82,10 @@ terraform apply
 
 App changes go through CI — push to `main`, the image gets built and pushed to ECR, Argo CD picks up the new tag and rolls it out. No manual `kubectl apply`.
 
+Each backend service should have its own image tag in ECR, even if the services share the same Dockerfile and codebase. That keeps rollouts and scaling isolated per service.
+
+The repo now follows a split-Dockerfile layout: one Dockerfile per app service plus one for the web frontend. That makes the ECR images map directly to Kubernetes Deployments.
+
 ## Configuration
 
 Secrets live in AWS Secrets Manager and are pulled into the cluster by External Secrets Operator. Non-secret config is in SSM Parameter Store. Nothing sensitive in env files or images.

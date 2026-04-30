@@ -27,8 +27,10 @@ services:
       retries: 20
 
   auth:
-    build: .
-    command: uvicorn services.auth.main:app --host 0.0.0.0 --port 3004
+    image: shopcloud-auth:local
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
     env_file: .env
     environment:
       PORT: 3004
@@ -38,8 +40,10 @@ services:
         condition: service_healthy
 
   catalog:
-    build: .
-    command: uvicorn services.catalog.main:app --host 0.0.0.0 --port 3001
+    image: shopcloud-catalog:local
+    build:
+      context: .
+      dockerfile: services/catalog/Dockerfile
     env_file: .env
     environment:
       PORT: 3001
@@ -49,8 +53,10 @@ services:
         condition: service_healthy
 
   cart:
-    build: .
-    command: uvicorn services.cart.main:app --host 0.0.0.0 --port 3002
+    image: shopcloud-cart:local
+    build:
+      context: .
+      dockerfile: services/cart/Dockerfile
     env_file: .env
     environment:
       PORT: 3002
@@ -62,8 +68,10 @@ services:
         condition: service_started
 
   checkout:
-    build: .
-    command: uvicorn services.checkout.main:app --host 0.0.0.0 --port 3003
+    image: shopcloud-checkout:local
+    build:
+      context: .
+      dockerfile: services/checkout/Dockerfile
     env_file: .env
     environment:
       PORT: 3003
@@ -75,8 +83,10 @@ services:
         condition: service_healthy
 
   admin:
-    build: .
-    command: uvicorn services.admin.main:app --host 0.0.0.0 --port 3005
+    image: shopcloud-admin:local
+    build:
+      context: .
+      dockerfile: services/admin/Dockerfile
     env_file: .env
     environment:
       PORT: 3005
@@ -86,8 +96,10 @@ services:
         condition: service_healthy
 
   invoice-worker:
-    build: .
-    command: python -m services.invoice_worker.main
+    image: shopcloud-invoice-worker:local
+    build:
+      context: .
+      dockerfile: services/invoice_worker/Dockerfile
     env_file: .env
     volumes:
       - invoice_files:/app/invoices
@@ -98,8 +110,10 @@ services:
         condition: service_healthy
 
   web:
-    build: .
-    command: uvicorn web.main:app --host 0.0.0.0 --port 3000
+    image: shopcloud-web:local
+    build:
+      context: .
+      dockerfile: web/Dockerfile
     env_file: .env
     environment:
       PORT: 3000
