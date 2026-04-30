@@ -95,6 +95,19 @@ services:
       postgres:
         condition: service_healthy
 
+  admin-ui:
+    image: shopcloud-admin-ui:local
+    build:
+      context: .
+      dockerfile: admin-ui/Dockerfile
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      auth:
+        condition: service_started
+      admin:
+        condition: service_started
+
   invoice-worker:
     image: shopcloud-invoice-worker:local
     build:
@@ -132,7 +145,6 @@ services:
       - catalog
       - cart
       - checkout
-      - admin
 
 volumes:
   postgres_data:

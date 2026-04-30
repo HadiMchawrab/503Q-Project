@@ -1,6 +1,6 @@
 # ShopCloud
 
-Small e-commerce platform running on AWS. Five services behind an EKS cluster, Postgres + Redis for data, and an async pipeline that emails invoice PDFs after checkout.
+Small e-commerce platform running on AWS. Five backend services plus a separate admin console endpoint behind an EKS cluster, Postgres + Redis for data, and an async pipeline that emails invoice PDFs after checkout.
 
 ## Stack
 
@@ -23,6 +23,7 @@ Small e-commerce platform running on AWS. Five services behind an EKS cluster, P
 | checkout  | Orders, payment, emits invoice events to SQS  |
 | auth      | Token exchange, JWT validation against Cognito|
 | admin     | Internal-only admin API                       |
+| admin-ui  | Internal-only admin console frontend          |
 
 Each service is a FastAPI app, one container per pod, 2 replicas minimum, spread across AZs.
 
@@ -60,12 +61,18 @@ Each service has its own `docker-compose.yml` for dev. The whole stack comes up 
 docker compose -f docker-compose.dev.yml up
 ```
 
-This gives you Postgres, Redis, LocalStack (for SQS/S3/SES), and all five services on their own ports. Frontend runs separately:
+This gives you Postgres, Redis, LocalStack (for SQS/S3/SES), the storefront, the admin API, and the internal admin console on separate endpoints. Frontend runs separately:
 
 ```
 cd web
 npm install
 npm run dev
+```
+
+Admin console:
+
+```text
+http://localhost:8081
 ```
 
 Copy `.env.example` to `.env` in each service before starting.
@@ -84,7 +91,9 @@ App changes go through CI — push to `main`, the image gets built and pushed to
 
 Each backend service should have its own image tag in ECR, even if the services share the same Dockerfile and codebase. That keeps rollouts and scaling isolated per service.
 
-The repo now follows a split-Dockerfile layout: one Dockerfile per app service plus one for the web frontend. That makes the ECR images map directly to Kubernetes Deployments.
+The customer storefront and the admin console are now split into separate frontend images and endpoints. In AWS, the admin console should live behind an internal ALB reachable only through VPN.
+
+The repo now follows a split-Dockerfile layout: one Dockerfile per app service plus one for the web storefront and one for the admin console. That makes the ECR images map directly to Kubernetes Deployments.
 
 ## Configuration
 
