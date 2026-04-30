@@ -5,6 +5,11 @@
 
 data "aws_caller_identity" "current" {}
 
+locals {
+  trusted_namespaces = length(var.namespaces) > 0 ? var.namespaces : [var.namespace]
+  trusted_subs       = [for ns in local.trusted_namespaces : "system:serviceaccount:${ns}:${var.service_account_name}"]
+}
+
 data "aws_iam_policy_document" "trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -14,12 +19,12 @@ data "aws_iam_policy_document" "trust" {
       identifiers = [var.oidc_provider_arn]
     }
 
-    # The condition is what scopes the role to *one* service account.
-    # Without this, any pod in the cluster could assume the role.
+    # Scope the role to specific service accounts. With multiple namespaces
+    # (e.g. dev + prod sharing one cluster), all of them are listed here.
     condition {
       test     = "StringEquals"
       variable = "${var.oidc_provider_url}:sub"
-      values   = ["system:serviceaccount:${var.namespace}:${var.service_account_name}"]
+      values   = local.trusted_subs
     }
 
     condition {

@@ -2,8 +2,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-invoices/*.pdf
-invoices/*.txt
 .venv/
 venv/
 node_modules/

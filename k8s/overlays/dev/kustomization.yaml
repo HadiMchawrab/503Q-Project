@@ -14,11 +14,14 @@ images:
     newName: REPLACE_WITH_ECR_URL/shopcloud-app
     newTag: latest
 
+# Dev does NOT process invoices — leaving INVOICE_QUEUE_URL empty makes
+# checkout's publish_invoice_event a no-op (see shared/queue.py).
+# Avoids dev orders sending real emails through the prod SQS/Lambda/SES path.
 configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
-      - INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT
+      - INVOICE_QUEUE_URL=
 
 patches:
   - path: checkout-sa-patch.yaml

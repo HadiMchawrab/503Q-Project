@@ -1,8 +1,10 @@
 # IRSA annotation on the checkout service account (dev).
-# Replace with terraform output when dev environment exists.
+# The role's trust policy accepts both prod and dev namespaces — see
+# infra/terraform/environments/prod/main.tf module.irsa_checkout.namespaces.
+# Replace with `terraform output -raw checkout_irsa_role_arn` (same role as prod).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: checkout
   annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout-dev
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout

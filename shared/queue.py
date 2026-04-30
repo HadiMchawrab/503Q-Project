@@ -24,14 +24,18 @@ async def publish_invoice_event(payload: dict[str, Any]) -> None:
 
     Consumed by the invoice-generator Lambda (see lambda/invoice_generator/).
     boto3 is sync; we run it in a thread to avoid blocking the event loop.
+
+    No-ops when INVOICE_QUEUE_URL is empty so dev environments can run without
+    publishing real invoice events that would email customers.
     """
     import asyncio
 
-    body = json.dumps(payload)
     queue_url = settings.invoice_queue_url
+    if not queue_url:
+        return
 
     await asyncio.to_thread(
         _client().send_message,
         QueueUrl=queue_url,
-        MessageBody=body,
+        MessageBody=json.dumps(payload),
     )

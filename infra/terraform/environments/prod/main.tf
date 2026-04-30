@@ -182,7 +182,7 @@ module "irsa_checkout" {
   source = "../../modules/iam_irsa"
 
   role_name            = "shopcloud-checkout"
-  namespace            = "prod"
+  namespaces           = ["prod", "dev"] # one cluster, two namespaces share this role
   service_account_name = "checkout"
   oidc_provider_arn    = module.eks.oidc_provider_arn
   oidc_provider_url    = module.eks.oidc_provider_url

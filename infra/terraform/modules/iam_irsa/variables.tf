@@ -4,8 +4,15 @@ variable "role_name" {
 }
 
 variable "namespace" {
-  description = "Kubernetes namespace of the service account that will assume this role."
+  description = "Kubernetes namespace of the service account that will assume this role. Use `namespaces` instead to allow multiple."
   type        = string
+  default     = ""
+}
+
+variable "namespaces" {
+  description = "List of namespaces whose <namespace>:<service_account_name> service accounts can assume this role. Takes precedence over `namespace` when non-empty."
+  type        = list(string)
+  default     = []
 }
 
 variable "service_account_name" {
