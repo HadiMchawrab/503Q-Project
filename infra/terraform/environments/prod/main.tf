@@ -84,5 +84,5 @@ module "data" {
 module "storage" {
   source = "../../modules/storage"
 
-  services = ["catalog", "cart", "checkout", "auth", "admin"]
+  services = ["catalog", "cart", "checkout", "auth", "admin", "admin-ui"]
 }

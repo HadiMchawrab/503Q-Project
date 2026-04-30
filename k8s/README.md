@@ -8,6 +8,7 @@ This folder intentionally contains only starter manifests. The Phase 2 app is Do
 - cart
 - checkout
 - admin
+- admin-ui
 - invoice-worker
 
-Use environment variables from ConfigMaps and Secrets. Keep production and development in separate namespaces or, preferably, separate AWS accounts/VPCs.
+Use environment variables from ConfigMaps and Secrets. Keep the storefront public, keep the admin API internal, and expose the admin-ui only through an internal ALB or VPN-only ingress. Keep production and development in separate namespaces or, preferably, separate AWS accounts/VPCs.
