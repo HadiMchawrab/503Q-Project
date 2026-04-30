@@ -108,20 +108,6 @@ services:
       admin:
         condition: service_started
 
-  invoice-worker:
-    image: shopcloud-invoice-worker:local
-    build:
-      context: .
-      dockerfile: services/invoice_worker/Dockerfile
-    env_file: .env
-    volumes:
-      - invoice_files:/app/invoices
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   web:
     image: shopcloud-web:local
     build:
