@@ -1,0 +1,8 @@
+# IRSA annotation on the checkout service account.
+# Replace the placeholder with `terraform output -raw checkout_irsa_role_arn`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: checkout
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout

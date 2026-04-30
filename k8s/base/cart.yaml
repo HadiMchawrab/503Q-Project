@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  labels: { app: cart }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: cart }
+  template:
+    metadata:
+      labels: { app: cart }
+    spec:
+      containers:
+        - name: cart
+          image: shopcloud-app:latest
+          command: ["uvicorn", "services.cart.main:app", "--host", "0.0.0.0", "--port", "3002"]
+          ports:
+            - containerPort: 3002
+          env:
+            - name: PORT
+              value: "3002"
+            - name: ROOT_PATH
+              value: /api/cart
+          envFrom:
+            - configMapRef: { name: shopcloud-config }
+            - secretRef: { name: shopcloud-secrets }
+          readinessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3002 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart
+spec:
+  selector: { app: cart }
+  ports:
+    - port: 3002
+      targetPort: 3002

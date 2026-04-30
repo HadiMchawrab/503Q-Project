@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dev
+
+resources:
+  - namespace.yaml
+  - ../../base
+
+# CI replaces `newTag` with the short Git SHA before applying:
+#   kustomize edit set image shopcloud-app=$REG/shopcloud-app:$TAG
+images:
+  - name: shopcloud-app
+    newName: REPLACE_WITH_ECR_URL/shopcloud-app
+    newTag: latest
+
+configMapGenerator:
+  - name: shopcloud-config
+    behavior: merge
+    literals:
+      - INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT
+
+patches:
+  - path: checkout-sa-patch.yaml
+    target:
+      kind: ServiceAccount
+      name: checkout
+
+# Cheaper footprint in dev — single replica per service.
+replicas:
+  - { name: auth,     count: 1 }
+  - { name: catalog,  count: 1 }
+  - { name: cart,     count: 1 }
+  - { name: checkout, count: 1 }
+  - { name: admin,    count: 1 }
+  - { name: web,      count: 1 }

@@ -1,0 +1,63 @@
+# ALB Ingress mirroring gateway/nginx.conf path-based routing.
+# Requires AWS Load Balancer Controller installed in the cluster.
+#
+# Note: nginx in dev rewrites `/api/auth/...` to `/...` upstream (see proxy_pass http://auth:3004/;).
+# That rewrite is the reason each FastAPI app sets ROOT_PATH (e.g. /api/auth) — Swagger and links
+# render correctly while routes are still defined without the prefix.
+#
+# The ALB does NOT rewrite by default. We use the `actions` annotation pattern only if needed,
+# but since each pod has ROOT_PATH set, the simplest path is to forward as-is and let the apps
+# treat the prefix as their root_path. FastAPI does this correctly when ROOT_PATH is set.
+#
+# IMPORTANT: /api/admin should NOT be on a public ALB in real prod — the nginx config flags this.
+# Move admin routes to a separate internal Ingress (scheme: internal) before going to production.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopcloud
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth
+                port: { number: 3004 }
+          - path: /api/catalog
+            pathType: Prefix
+            backend:
+              service:
+                name: catalog
+                port: { number: 3001 }
+          - path: /api/cart
+            pathType: Prefix
+            backend:
+              service:
+                name: cart
+                port: { number: 3002 }
+          - path: /api/checkout
+            pathType: Prefix
+            backend:
+              service:
+                name: checkout
+                port: { number: 3003 }
+          - path: /api/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port: { number: 3005 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: web
+                port: { number: 3000 }

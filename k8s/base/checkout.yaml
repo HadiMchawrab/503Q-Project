@@ -1,0 +1,57 @@
+# Service account for IRSA. The overlay annotates this with
+# eks.amazonaws.com/role-arn=<terraform output checkout_irsa_role_arn>
+# so the pod gets sqs:SendMessage permission on the invoice queue.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: checkout
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  labels: { app: checkout }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: checkout }
+  template:
+    metadata:
+      labels: { app: checkout }
+    spec:
+      serviceAccountName: checkout
+      containers:
+        - name: checkout
+          image: shopcloud-app:latest
+          command: ["uvicorn", "services.checkout.main:app", "--host", "0.0.0.0", "--port", "3003"]
+          ports:
+            - containerPort: 3003
+          env:
+            - name: PORT
+              value: "3003"
+            - name: ROOT_PATH
+              value: /api/checkout
+          envFrom:
+            - configMapRef: { name: shopcloud-config }
+            - secretRef: { name: shopcloud-secrets }
+          readinessProbe:
+            httpGet: { path: /health, port: 3003 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 3003 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: checkout
+spec:
+  selector: { app: checkout }
+  ports:
+    - port: 3003
+      targetPort: 3003
