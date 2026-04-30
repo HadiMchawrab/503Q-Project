@@ -24,6 +24,22 @@ provider "aws" {
   }
 }
 
+# us-east-1 alias — required for:
+#   - WAFv2 CLOUDFRONT-scoped Web ACLs (must live in us-east-1)
+#   - Cross-region RDS read replica for DR
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "shopcloud"
+      Environment = "prod"
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
 # ----------------------------------------------------------------------------
 # Network — VPC, subnets across 3 AZs, NAT gateway.
 # Everything else lives inside this VPC.
@@ -171,4 +187,68 @@ module "irsa_checkout" {
   oidc_provider_arn    = module.eks.oidc_provider_arn
   oidc_provider_url    = module.eks.oidc_provider_url
   policy_json          = data.aws_iam_policy_document.checkout_sqs.json
+}
+
+# ============================================================================
+# IDENTITY — Cognito user pools (customers + admins)
+# ============================================================================
+module "cognito" {
+  source = "../../modules/cognito"
+  name   = "shopcloud"
+}
+
+# ============================================================================
+# EDGE — Route 53 latency routing + CloudFront + WAF
+# Pass the alb_dns_name from outside terraform (set after the AWS Load Balancer
+# Controller provisions the public ALB) or from a future ALB module.
+# When var.public_alb_dns_name is empty the module is skipped.
+# ============================================================================
+module "edge" {
+  count  = var.public_alb_dns_name == "" ? 0 : 1
+  source = "../../modules/edge"
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  name             = "shopcloud"
+  alb_dns_name     = var.public_alb_dns_name
+  hosted_zone_id   = var.hosted_zone_id
+  domain_name      = var.domain_name
+  primary_region   = var.region
+  secondary_region = "us-east-1"
+}
+
+# ============================================================================
+# DR — Cross-region RDS read replica in us-east-1
+# Promoted manually if eu-west-1 has a regional outage.
+# ============================================================================
+resource "aws_db_instance" "replica_us_east_1" {
+  count    = var.enable_cross_region_replica ? 1 : 0
+  provider = aws.us_east_1
+
+  identifier          = "shopcloud-postgres-replica"
+  replicate_source_db = module.data.rds_arn
+  instance_class      = "db.t3.micro"
+
+  publicly_accessible = false
+  skip_final_snapshot = true
+
+  tags = { Name = "shopcloud-postgres-replica" }
+}
+
+# ============================================================================
+# ADMIN PATH — Client VPN (cert-based, MFA via the admin Cognito pool)
+# Server + client root certs must be uploaded to ACM out-of-band.
+# ============================================================================
+module "vpn" {
+  count  = var.enable_client_vpn ? 1 : 0
+  source = "../../modules/vpn"
+
+  name                     = "shopcloud"
+  vpc_id                   = module.network.vpc_id
+  vpc_cidr                 = "10.0.0.0/16"
+  subnet_ids               = module.network.private_subnet_ids
+  acm_server_cert_arn      = var.vpn_server_cert_arn
+  acm_client_root_cert_arn = var.vpn_client_root_cert_arn
 }

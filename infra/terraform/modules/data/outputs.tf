@@ -25,3 +25,8 @@ output "rds_db_name" {
   description = "Database name (matches db_name on the RDS instance)."
   value       = aws_db_instance.this.db_name
 }
+
+output "rds_arn" {
+  description = "ARN of the primary RDS instance — needed to create cross-region read replicas."
+  value       = aws_db_instance.this.arn
+}

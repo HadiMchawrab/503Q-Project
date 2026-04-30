@@ -37,5 +37,11 @@ class Settings:
     aws_region: str = os.getenv("AWS_REGION", "eu-west-1")
     invoice_queue_url: str = os.getenv("INVOICE_QUEUE_URL", "")
 
+    # Cognito — when COGNITO_USER_POOL_ID is set, services validate RS256 JWTs
+    # against the pool's JWKS instead of the local HS256 secret.
+    cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
+    cognito_admin_pool_id: str = os.getenv("COGNITO_ADMIN_POOL_ID", "")
+    cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
+
 
 settings = Settings()

@@ -1,0 +1,24 @@
+# Admin ingress — internal ALB, no public DNS record.
+# Reachable only from the corporate network via Client VPN (see infra/terraform/modules/vpn).
+# The AWS Load Balancer Controller provisions a separate ALB because alb.ingress.kubernetes.io/group.name
+# is not set the same as the public ingress.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopcloud-admin
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /api/admin
+            pathType: Prefix
+            backend:
+              service:
+                name: admin
+                port: { number: 3005 }

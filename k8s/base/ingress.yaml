@@ -9,8 +9,7 @@
 # but since each pod has ROOT_PATH set, the simplest path is to forward as-is and let the apps
 # treat the prefix as their root_path. FastAPI does this correctly when ROOT_PATH is set.
 #
-# IMPORTANT: /api/admin should NOT be on a public ALB in real prod — the nginx config flags this.
-# Move admin routes to a separate internal Ingress (scheme: internal) before going to production.
+# Admin routes are NOT on this ingress — see ingress-admin.yaml for the internal ALB.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -49,12 +48,6 @@ spec:
               service:
                 name: checkout
                 port: { number: 3003 }
-          - path: /api/admin
-            pathType: Prefix
-            backend:
-              service:
-                name: admin
-                port: { number: 3005 }
           - path: /
             pathType: Prefix
             backend:

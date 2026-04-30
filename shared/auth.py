@@ -14,6 +14,21 @@ from shared.errors import AppError
 
 _bearer = HTTPBearer(auto_error=False)
 
+# Cognito JWKS clients are cached per-pool. PyJWKClient handles fetch + key rotation.
+_jwks_clients: dict[str, jwt.PyJWKClient] = {}
+
+
+def _cognito_issuer(pool_id: str) -> str:
+    return f"https://cognito-idp.{settings.aws_region}.amazonaws.com/{pool_id}"
+
+
+def _jwks_client_for(pool_id: str) -> jwt.PyJWKClient:
+    client = _jwks_clients.get(pool_id)
+    if client is None:
+        client = jwt.PyJWKClient(f"{_cognito_issuer(pool_id)}/.well-known/jwks.json")
+        _jwks_clients[pool_id] = client
+    return client
+
 
 def normalize_email(email: str | None) -> str:
     return str(email or "").strip().lower()
@@ -42,7 +57,23 @@ def sign_token(user: dict[str, Any]) -> str:
 
 
 def verify_token(raw_token: str) -> dict[str, Any]:
+    # Prefer Cognito (RS256 + JWKS) when configured; fall back to local HS256 for dev.
     try:
+        if settings.cognito_user_pool_id:
+            for pool_id in filter(None, [settings.cognito_user_pool_id, settings.cognito_admin_pool_id]):
+                try:
+                    signing_key = _jwks_client_for(pool_id).get_signing_key_from_jwt(raw_token).key
+                    return jwt.decode(
+                        raw_token,
+                        signing_key,
+                        algorithms=["RS256"],
+                        issuer=_cognito_issuer(pool_id),
+                        options={"verify_aud": False},
+                    )
+                except jwt.PyJWTError:
+                    continue
+            raise AppError(401, "INVALID_TOKEN", "Invalid or expired token")
+
         return jwt.decode(
             raw_token,
             settings.jwt_secret,

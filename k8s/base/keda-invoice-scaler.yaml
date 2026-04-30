@@ -1,0 +1,40 @@
+# KEDA ScaledObject — scales the invoice consumer Deployment based on SQS queue depth.
+# Requires KEDA installed in the cluster (kedacore/keda Helm chart).
+#
+# Note: today the invoice processor runs as a Lambda (see infra/terraform/modules/lambda).
+# This manifest is the K8s equivalent for when consumers move into the cluster — it is
+# applied alongside an `invoice-worker` Deployment with the same service account.
+# Until that Deployment exists this resource is a no-op (KEDA ignores missing targets).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: invoice-worker
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: invoice-worker-aws
+spec:
+  podIdentity:
+    provider: aws-eks   # uses IRSA on the invoice-worker ServiceAccount
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: invoice-worker
+spec:
+  scaleTargetRef:
+    name: invoice-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef:
+        name: invoice-worker-aws
+      metadata:
+        queueURL: PLACEHOLDER_SET_BY_OVERLAY
+        queueLength: "5"
+        awsRegion: eu-west-1
