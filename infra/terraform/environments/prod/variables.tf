@@ -20,3 +20,45 @@ variable "ses_sender" {
   type        = string
   default     = "invoices@shopcloud.local"
 }
+
+variable "public_alb_dns_name" {
+  description = "DNS name of the public ALB (CloudFront origin). Populated after the AWS Load Balancer Controller creates the ingress ALB; supply via -var on the second apply."
+  type        = string
+  default     = ""
+}
+
+variable "hosted_zone_id" {
+  description = "Route 53 hosted zone ID for the customer-facing domain. Empty disables Route 53 records (CloudFront + WAF still deploy)."
+  type        = string
+  default     = ""
+}
+
+variable "domain_name" {
+  description = "Customer-facing domain (e.g. shop.shopcloud.com)."
+  type        = string
+  default     = ""
+}
+
+variable "enable_client_vpn" {
+  description = "Whether to provision the admin Client VPN. Requires ACM certs to exist."
+  type        = bool
+  default     = false
+}
+
+variable "enable_cross_region_replica" {
+  description = "Whether to provision the us-east-1 RDS read replica for DR."
+  type        = bool
+  default     = false
+}
+
+variable "vpn_server_cert_arn" {
+  description = "ACM ARN of the Client VPN server cert."
+  type        = string
+  default     = ""
+}
+
+variable "vpn_client_root_cert_arn" {
+  description = "ACM ARN of the client root CA cert used to verify admin client certs."
+  type        = string
+  default     = ""
+}

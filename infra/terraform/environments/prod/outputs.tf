@@ -47,3 +47,29 @@ output "checkout_irsa_role_arn" {
   description = "Annotate the prod/checkout K8s service account with this role ARN so the pod can call sqs:SendMessage."
   value       = module.irsa_checkout.role_arn
 }
+
+# Cognito — wire these into the service ConfigMap (COGNITO_USER_POOL_ID, COGNITO_ADMIN_POOL_ID)
+# so shared/auth.py validates Cognito JWTs.
+output "cognito_customer_pool_id" {
+  value = module.cognito.customer_pool_id
+}
+
+output "cognito_admin_pool_id" {
+  value = module.cognito.admin_pool_id
+}
+
+output "cognito_customer_client_id" {
+  value = module.cognito.customer_pool_client_id
+}
+
+# Edge
+output "cloudfront_domain_name" {
+  description = "CNAME this from your DNS provider if hosted_zone_id is empty."
+  value       = module.edge.cloudfront_domain_name
+}
+
+# DR
+output "rds_replica_endpoint" {
+  description = "us-east-1 read replica endpoint."
+  value       = aws_db_instance.replica_us_east_1.address
+}
