@@ -86,3 +86,89 @@ module "storage" {
 
   services = ["catalog", "cart", "checkout", "auth", "admin", "admin-ui"]
 }
+
+
+
+# ============================================================================
+# INVOICE PIPELINE
+# checkout (pod) ──SQS──▶ invoice-generator (Lambda)
+#                                ├── render PDF
+#                                ├── upload to S3
+#                                ├── send via SES
+#                                └── update RDS
+# ============================================================================
+
+# Store the DB password in Secrets Manager so the Lambda can fetch it at runtime.
+# EKS pods read it via the existing var.db_password mechanism for now.
+resource "aws_secretsmanager_secret" "db_password" {
+  name = "shopcloud/rds/password"
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_string = var.db_password
+}
+
+# ----------------------------------------------------------------------------
+# S3 — invoices bucket
+# ----------------------------------------------------------------------------
+module "s3_invoices" {
+  source = "../../modules/s3"
+
+  # Bucket names are globally unique. Prepend account ID to avoid collisions.
+  bucket_name = "shopcloud-invoices-${data.aws_caller_identity.current.account_id}"
+}
+
+data "aws_caller_identity" "current" {}
+
+# ----------------------------------------------------------------------------
+# SQS — invoice events queue + DLQ
+# ----------------------------------------------------------------------------
+module "messaging" {
+  source = "../../modules/messaging"
+  name   = "shopcloud"
+}
+
+# ----------------------------------------------------------------------------
+# Lambda — invoice generator
+# ----------------------------------------------------------------------------
+module "lambda_invoice" {
+  source = "../../modules/lambda"
+
+  function_name         = "shopcloud-invoice-generator"
+  vpc_id                = module.network.vpc_id
+  subnet_ids            = module.network.private_subnet_ids
+  rds_security_group_id = module.data.rds_security_group_id
+
+  sqs_queue_arn  = module.messaging.queue_arn
+  s3_bucket_name = module.s3_invoices.bucket_name
+  s3_bucket_arn  = module.s3_invoices.bucket_arn
+
+  ses_sender    = var.ses_sender
+  db_secret_arn = aws_secretsmanager_secret.db_password.arn
+  db_host       = module.data.rds_endpoint
+  db_name       = module.data.rds_db_name
+  db_user       = "shopcloud"
+}
+
+# ----------------------------------------------------------------------------
+# IRSA — checkout pod can sqs:SendMessage to the invoice queue.
+# Annotate the K8s service account with the role ARN this exports.
+# ----------------------------------------------------------------------------
+data "aws_iam_policy_document" "checkout_sqs" {
+  statement {
+    actions   = ["sqs:SendMessage", "sqs:GetQueueUrl"]
+    resources = [module.messaging.queue_arn]
+  }
+}
+
+module "irsa_checkout" {
+  source = "../../modules/iam_irsa"
+
+  role_name            = "shopcloud-checkout"
+  namespace            = "prod"
+  service_account_name = "checkout"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_provider_url    = module.eks.oidc_provider_url
+  policy_json          = data.aws_iam_policy_document.checkout_sqs.json
+}

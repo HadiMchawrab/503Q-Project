@@ -25,3 +25,25 @@ output "redis_endpoint" {
   description = "Redis primary endpoint for application config."
   value       = module.data.redis_endpoint
 }
+
+# Invoice pipeline outputs
+
+output "invoice_queue_url" {
+  description = "SQS queue URL — set on the checkout pod as INVOICE_QUEUE_URL."
+  value       = module.messaging.queue_url
+}
+
+output "invoice_bucket_name" {
+  description = "S3 bucket where invoice PDFs are stored."
+  value       = module.s3_invoices.bucket_name
+}
+
+output "invoice_lambda_ecr_url" {
+  description = "ECR repo for the invoice-generator Lambda container image. CI pushes here."
+  value       = module.lambda_invoice.ecr_repository_url
+}
+
+output "checkout_irsa_role_arn" {
+  description = "Annotate the prod/checkout K8s service account with this role ARN so the pod can call sqs:SendMessage."
+  value       = module.irsa_checkout.role_arn
+}

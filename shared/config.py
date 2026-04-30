@@ -34,8 +34,8 @@ class Settings:
     auth_service_url: str = os.getenv("AUTH_SERVICE_URL", "http://auth:3004")
     admin_service_url: str = os.getenv("ADMIN_SERVICE_URL", "http://admin:3005")
 
-    invoice_output_dir: str = os.getenv("INVOICE_OUTPUT_DIR", "/app/invoices")
-    invoice_queue_stream: str = os.getenv("INVOICE_QUEUE_STREAM", "invoice-events")
+    aws_region: str = os.getenv("AWS_REGION", "eu-west-1")
+    invoice_queue_url: str = os.getenv("INVOICE_QUEUE_URL", "")
 
 
 settings = Settings()

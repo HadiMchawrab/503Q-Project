@@ -130,8 +130,6 @@ services:
     env_file: .env
     environment:
       PORT: 3000
-    volumes:
-      - invoice_files:/app/web/public/invoices:ro
 
   gateway:
     image: nginx:1.27-alpine
@@ -148,4 +146,3 @@ services:
 
 volumes:
   postgres_data:
-  invoice_files:

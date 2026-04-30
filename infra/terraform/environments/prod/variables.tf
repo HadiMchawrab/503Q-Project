@@ -14,3 +14,9 @@ variable "db_password" {
   sensitive   = true
   # No default — must be supplied via terraform.tfvars or -var.
 }
+
+variable "ses_sender" {
+  description = "Verified From: address SES will send invoices from. Domain must be verified in SES (sandbox: per-email)."
+  type        = string
+  default     = "invoices@shopcloud.local"
+}
