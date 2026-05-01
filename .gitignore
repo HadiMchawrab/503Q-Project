@@ -11,8 +11,12 @@ node_modules/
 *.tfstate
 *.tfstate.*
 *.tfplan
+tfplan
 crash.log
 crash.*.log
+# Local apply/plan artifacts captured during ad-hoc runs
+apply*.log
+plan*.txt
 # Real var files contain secrets (db_password, etc.). Examples are committed.
 terraform.tfvars
 terraform.tfvars.json

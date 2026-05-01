@@ -146,11 +146,25 @@ jobs:
             -t "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}" \
             .
 
+      - name: Build invoice-worker image
+        # Only built/pushed for prod — dev's overlay does not include the
+        # invoice-worker Deployment (INVOICE_QUEUE_URL is empty in dev so
+        # checkout's publish_invoice_event is a no-op).
+        if: needs.resolve.outputs.environment == 'prod'
+        run: |
+          docker build \
+            -f services/invoice_worker/Dockerfile \
+            -t "$ECR_REGISTRY/invoice-worker:${{ steps.tag.outputs.image_tag }}" \
+            .
+
       - name: Push images
         if: needs.resolve.outputs.should_deploy == 'true'
         run: |
           docker push "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}"
           docker push "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}"
+          if [[ "${{ needs.resolve.outputs.environment }}" == "prod" ]]; then
+            docker push "$ECR_REGISTRY/invoice-worker:${{ steps.tag.outputs.image_tag }}"
+          fi
 
   # ----------------------------------------------------------------------------
   # Apply the right kustomize overlay against EKS.
@@ -219,6 +233,10 @@ jobs:
             echo "COGNITO_CUSTOMER_DOMAIN=$(out cognito_customer_hosted_ui_domain)"
             echo "COGNITO_ADMIN_DOMAIN=$(out cognito_admin_hosted_ui_domain)"
             echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
+            echo "INVOICE_WORKER_IRSA_ROLE_ARN=$(out invoice_worker_irsa_role_arn)"
+            echo "INVOICES_BUCKET=$(out invoice_bucket_name)"
+            echo "DB_HOST=$(out rds_endpoint)"
+            echo "DB_SECRET_ARN=$(out db_secret_arn)"
             echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
             echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
             # GitHub masks this in logs because it's marked sensitive.
@@ -252,13 +270,19 @@ jobs:
 
       - name: Configure overlay
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        env:
+          ENV: ${{ needs.resolve.outputs.environment }}
         run: |
           set -euo pipefail
           TAG="${{ needs.build.outputs.image_tag }}"
 
-          # 1) Pin both images to the SHA we just pushed.
+          # 1) Pin app/admin-ui images. invoice-worker is prod-only because
+          #    the dev overlay does not include the worker Deployment.
           kustomize edit set image "shopcloud-app=$ECR_REGISTRY/shopcloud-app:$TAG"
           kustomize edit set image "admin-ui=$ECR_REGISTRY/admin-ui:$TAG"
+          if [[ "$ENV" == "prod" ]]; then
+            kustomize edit set image "invoice-worker=$ECR_REGISTRY/invoice-worker:$TAG"
+          fi
 
           # 2) Merge real config values from terraform outputs into the
           #    shopcloud-config ConfigMap (the base has empty placeholders).
@@ -278,11 +302,31 @@ jobs:
             --behavior=merge \
             --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}'
 
+          # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
+          #     DB_HOST/NAME/USER/SECRET_ARN. The base placeholders are
+          #     REPLACE_WITH_TERRAFORM_OUTPUT — overwrite them here.
+          if [[ "$ENV" == "prod" ]]; then
+            kustomize edit add configmap shopcloud-config \
+              --behavior=merge \
+              --from-literal=INVOICES_BUCKET='${{ steps.tf_out.outputs.INVOICES_BUCKET }}' \
+              --from-literal=SES_SENDER='hadi.mchawrab24@gmail.com' \
+              --from-literal=DB_HOST='${{ steps.tf_out.outputs.DB_HOST }}' \
+              --from-literal=DB_NAME='shopcloud_prod' \
+              --from-literal=DB_USER='shopcloud' \
+              --from-literal=DB_SECRET_ARN='${{ steps.tf_out.outputs.DB_SECRET_ARN }}'
+          fi
+
           # 3) Patch the IRSA role ARN onto the checkout ServiceAccount.
           #    The overlay already references checkout-sa-patch.yaml; we just
           #    rewrite the placeholder ARN inline so it never gets committed.
           sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout|${{ steps.tf_out.outputs.CHECKOUT_IRSA_ROLE_ARN }}|g" \
             checkout-sa-patch.yaml
+
+          # 3b) Same for invoice-worker (prod-only — dev overlay has no patch).
+          if [[ "$ENV" == "prod" ]]; then
+            sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-invoice-worker|${{ steps.tf_out.outputs.INVOICE_WORKER_IRSA_ROLE_ARN }}|g" \
+              invoice-worker-sa-patch.yaml
+          fi
 
       - name: Diff (informational)
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
@@ -296,8 +340,15 @@ jobs:
         run: kustomize build . | kubectl apply -f -
 
       - name: Wait for rollout
+        env:
+          ENV: ${{ needs.resolve.outputs.environment }}
         run: |
           NS="${{ needs.resolve.outputs.namespace }}"
-          for d in auth catalog cart checkout admin admin-ui; do
+          DEPLOYMENTS="auth catalog cart checkout admin admin-ui"
+          # invoice-worker is prod-only (no Deployment exists in dev overlay).
+          if [[ "$ENV" == "prod" ]]; then
+            DEPLOYMENTS="$DEPLOYMENTS invoice-worker"
+          fi
+          for d in $DEPLOYMENTS; do
             kubectl -n "$NS" rollout status deployment/$d --timeout=5m
           done

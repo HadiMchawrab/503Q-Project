@@ -458,11 +458,15 @@ sends a fresh link.
 
 ## Step 4 — Terraform first apply
 
-**Status: in progress, partial.** 82 of 84 planned resources successfully
-created across two `terraform apply` runs. The Lambda function (and its
-event source mapping) is the last unfinished resource — blocked on a
-chicken-and-egg with ECR, currently being unblocked by pushing a bootstrap
-image (in flight).
+**Status: done.** All 84 planned resources created over four `terraform
+apply` runs. The two `postgresql_database` resources are intentionally
+disabled by `create_per_env_databases = false` and will be created
+manually post-deploy (see "Per-env DB creation" below).
+
+Final apply (Lambda + event source mapping) succeeded after the bootstrap
+image was pushed to ECR. The Lambda is `Active` and running the
+`shopcloud-invoice-generator:bootstrap` image — CI will overwrite this
+once a Lambda build step is added to the deploy workflow.
 
 This step is the heavy lift: it stands up everything from VPC and EKS down
 to S3 and Cognito, leaving only CloudFront/storefront for Step 8 (which
@@ -756,15 +760,80 @@ infra/terraform/modules/
 .terraform.lock.hcl (in env/prod)           NEW — should be committed
 ```
 
+### Per-env DB creation (next manual task)
+
+The `shopcloud_prod` and `shopcloud_dev` databases inside the RDS
+instance still need to be created. They were skipped during apply because
+the postgres provider runs from wherever `terraform apply` runs (a laptop
+outside the VPC), and RDS is in private subnets — unreachable from
+outside.
+
+The cleanest way to create them is from a one-shot pod inside the cluster
+once kubeconfig is set up (Step 7+):
+
+```bash
+aws eks update-kubeconfig --name shopcloud --region eu-west-1
+
+PASSWORD=$(aws secretsmanager get-secret-value \
+  --secret-id shopcloud/rds/password \
+  --query SecretString --output text)
+
+kubectl run --rm -it psql-once --restart=Never \
+  --image=postgres:16 -- \
+  psql "postgresql://shopcloud:$PASSWORD@shopcloud-postgres.cjqo0amu2gx6.eu-west-1.rds.amazonaws.com:5432/shopcloud" \
+  -c "CREATE DATABASE shopcloud_prod; CREATE DATABASE shopcloud_dev;"
+```
+
+The shopcloud master database (`db_name = "shopcloud"`) was created
+automatically by RDS — that's what we connect to in order to issue
+`CREATE DATABASE`.
+
+### Terraform outputs (live values, current account)
+
+For wiring into Step 5 (GitHub repo config) and beyond:
+
+| Output | Value |
+|---|---|
+| `cluster_name` | `shopcloud` |
+| `cluster_endpoint` | `https://830EF3E73435FF345A32CF602FC9187D.gr7.eu-west-1.eks.amazonaws.com` |
+| `rds_endpoint` | `shopcloud-postgres.cjqo0amu2gx6.eu-west-1.rds.amazonaws.com` |
+| `redis_endpoint` | `master.shopcloud-redis.ogcoyh.euw1.cache.amazonaws.com` |
+| `invoice_queue_url` | `https://sqs.eu-west-1.amazonaws.com/621721788004/shopcloud-invoice-events` |
+| `invoice_bucket_name` | `shopcloud-invoices-621721788004` |
+| `invoice_lambda_ecr_url` | `621721788004.dkr.ecr.eu-west-1.amazonaws.com/shopcloud-invoice-generator` |
+| `db_secret_arn` | `arn:aws:secretsmanager:eu-west-1:621721788004:secret:shopcloud/rds/password-CBsoBq` |
+| `checkout_irsa_role_arn` | `arn:aws:iam::621721788004:role/shopcloud-checkout` |
+| `invoice_worker_irsa_role_arn` | `arn:aws:iam::621721788004:role/shopcloud-invoice-worker` |
+| `cluster_autoscaler_role_arn` | `arn:aws:iam::621721788004:role/shopcloud-cluster-autoscaler` |
+| `cognito_customer_pool_id` | `eu-west-1_KEhDFvCn2` |
+| `cognito_admin_pool_id` | `eu-west-1_mkqryBDYT` |
+| `cognito_customer_client_id` | `6d4vv2j4eu88rcs132tkk4b77a` |
+| `cognito_admin_client_id` | `75ncljb2jptcp9knv8sdle8l3m` |
+| `cognito_customer_hosted_ui_domain` | `https://shopcloud-customers.auth.eu-west-1.amazoncognito.com` |
+| `cognito_admin_hosted_ui_domain` | `https://shopcloud-admins.auth.eu-west-1.amazoncognito.com` |
+| `frontend_bucket_name` | `""` (skipped — Step 8) |
+| `cloudfront_distribution_id` | `""` (skipped — Step 8) |
+
+ECR repos (per `ecr_repository_urls`):
+- `621721788004.dkr.ecr.eu-west-1.amazonaws.com/shopcloud-app`
+- `621721788004.dkr.ecr.eu-west-1.amazonaws.com/admin-ui`
+- `621721788004.dkr.ecr.eu-west-1.amazonaws.com/invoice-worker`
+- `621721788004.dkr.ecr.eu-west-1.amazonaws.com/shopcloud-invoice-generator`
+
 ### Open issues to address before merging Step 4 to main
 
-1. **`.terraform.lock.hcl` not yet committed.** Should be in git so CI uses
-   identical provider versions.
-2. **Bootstrap Lambda image is a real image, not a placeholder.** When CI
-   takes over the image lifecycle it will tag with the Git SHA, leaving
-   `:bootstrap` orphaned. Either delete the `:bootstrap` tag manually
-   after CI's first push, or accept it as a dead tag (ECR lifecycle policy
-   will eventually clean it up).
+1. **`.terraform.lock.hcl` is gitignored at
+   [`infra/terraform/.gitignore:5`](../infra/terraform/.gitignore#L5).**
+   Terraform best practice is to commit the lock file so every machine /
+   CI runner uses identical provider checksums. The current setup lets
+   each environment resolve provider versions independently, which is
+   risky for CI reproducibility. Recommended fix: remove that line and
+   force-add the file. (Not done in this session — flagged for review.)
+2. **Bootstrap Lambda image is the real Dockerfile, not a placeholder.**
+   When CI takes over the image lifecycle it will tag with the Git SHA,
+   leaving `:bootstrap` orphaned. Either delete the `:bootstrap` tag
+   manually after CI's first push, or accept it as a dead tag (ECR
+   lifecycle policy will eventually clean it up).
 3. **CI does not build the Lambda or invoice-worker images.**
    [.github/workflows/deploy.yml:98-119](../.github/workflows/deploy.yml#L98-L119)
    only builds `shopcloud-app` and `admin-ui`. Add a third build step for
@@ -777,6 +846,16 @@ infra/terraform/modules/
    `var.backup_retention_period`) and override per-environment, or
    document that "switch to paid account" means reverting these specific
    lines.
+5. **Deprecation warning on backend.** Terraform 1.14+ surfaces a warning
+   that `dynamodb_table` is deprecated in favour of `use_lockfile = true`
+   in [`backend.tf`](../infra/terraform/environments/prod/backend.tf).
+   Cosmetic for now; bump when you next touch that file.
+6. **`invoice-worker-sa-patch.yaml` IRSA ARN substitution missing in CI.**
+   [.github/workflows/deploy.yml:250-251](../.github/workflows/deploy.yml#L250-L251)
+   only `sed`s the checkout SA patch. The invoice-worker patch at
+   [k8s/overlays/prod/invoice-worker-sa-patch.yaml:9](../k8s/overlays/prod/invoice-worker-sa-patch.yaml#L9)
+   still has `REPLACE_ACCOUNT_ID` literal. Add a parallel `sed` using
+   `terraform output -raw invoice_worker_irsa_role_arn`.
 
 ### Verification
 
@@ -819,9 +898,89 @@ Will take ~15 minutes (RDS deletion is the long pole). The state backend
 S3 bucket and DDB table from Step 1 are NOT destroyed by this — they are
 out-of-band manual resources, intentional.
 
-## Step 5 — GitHub repo secrets and variables (not yet done)
+## Step 5 — GitHub repo secrets, variables, and Environments
 
-To be filled in when executed.
+**Status: done** (configured at `https://github.com/HadiMchawrab/503Q-Project/settings`).
+
+This step plugs the values Terraform produced (Step 4) and the IAM role
+ARNs (Step 2) into GitHub so the workflows can authenticate to AWS and
+target the right cluster/registry. Nothing is created in AWS — this is
+pure GitHub configuration.
+
+### Repository secrets
+
+`Settings → Secrets and variables → Actions → Secrets`
+
+| Name | Value | Used by |
+|---|---|---|
+| `ROLE_TO_ASSUME_PROD` | `arn:aws:iam::621721788004:role/gh-actions-shopcloud-prod` | Both workflows when running on `main` / `prod` env |
+| `ROLE_TO_ASSUME_DEV` | `arn:aws:iam::621721788004:role/gh-actions-shopcloud-dev` | `deploy.yml` when running on `dev` / PRs |
+| `RDS_DB_PASSWORD` | (the 32-char string from `terraform.tfvars`) | `terraform.yml` as `TF_VAR_db_password` ([terraform.yml:71](../.github/workflows/terraform.yml#L71), [`:120`](../.github/workflows/terraform.yml#L120)) |
+
+**Drift warning.** `RDS_DB_PASSWORD` must match the value in the local
+`terraform.tfvars` and the version stored in Secrets Manager
+(`shopcloud/rds/password`). If they ever diverge, the next CI
+`terraform apply` will silently rewrite the RDS master password to match
+the GitHub secret. Rotate in all three places at once.
+
+### Repository variables
+
+`Settings → Secrets and variables → Actions → Variables`
+
+| Name | Value | Used by |
+|---|---|---|
+| `ECR_REGISTRY` | `621721788004.dkr.ecr.eu-west-1.amazonaws.com` | `deploy.yml` for `docker tag` / `docker push` ([deploy.yml:104](../.github/workflows/deploy.yml#L104)) |
+| `EKS_CLUSTER_NAME` | `shopcloud` | `deploy.yml` for `aws eks update-kubeconfig` ([deploy.yml:142](../.github/workflows/deploy.yml#L142)) |
+
+Variables differ from secrets in that they are visible in workflow logs.
+Both of these are non-sensitive (account ID is observable in any AWS API
+call; cluster name is non-secret), so variable scope is correct.
+
+### Environments
+
+`Settings → Environments`
+
+**`prod` environment:**
+
+| Setting | Value | Why |
+|---|---|---|
+| Required reviewers | `HadiMchawrab` | Pauses any deploy or `terraform apply` targeting prod until manually approved. The `prod` GitHub Environment is what `terraform.yml`'s apply job ([terraform.yml:99](../.github/workflows/terraform.yml#L99)) and `deploy.yml`'s deploy job ([deploy.yml:131](../.github/workflows/deploy.yml#L131)) attach to via `environment: prod`. |
+| Prevent self-review | unchecked | Solo project — checking it would lock you out (no one else can approve). On a team this should be on. |
+| Wait timer | unchecked | Optional cooldown; not needed here. |
+| Allow administrators to bypass | checked | Lets you override the approval gate in emergencies. Trade-off: weakens the gate. Off for stricter shops. |
+| Deployment branches | `main` only | Even a manual `workflow_dispatch` from another branch can't target this environment. |
+
+**`dev` environment:**
+
+- No required reviewers (auto-deploys on every push to `dev`)
+- Deployment branches: `dev` only
+
+The `dev`/`prod` Environment names also matter for OIDC. The role trust
+policies created in Step 2 condition on the JWT's `sub` claim, which
+takes the form `repo:<owner>/<repo>:environment:<env>` when a workflow
+job has `environment: <env>` set. So the Environment **name** must be
+exactly `prod` or `dev` for OIDC to succeed; mismatched names → role
+assumption fails with `AccessDenied`.
+
+### Verification
+
+The full chain only verifies end-to-end on the first workflow run
+(Step 6). What we can confirm now:
+
+```
+Settings → Actions → Secrets         shows: 3 secrets set
+Settings → Actions → Variables       shows: 2 variables set
+Settings → Environments              shows: prod (1 protection rule), dev
+```
+
+### Repo state after this step
+
+Unchanged. GitHub-side configuration only.
+
+### Rollback
+
+Delete the secrets/variables/environments in the GitHub UI. No AWS
+resources are touched.
 
 ## Step 6 — First push / deploy (not yet done)
 
