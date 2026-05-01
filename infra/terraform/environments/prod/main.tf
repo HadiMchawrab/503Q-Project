@@ -331,6 +331,30 @@ module "irsa_invoice_worker" {
 module "cognito" {
   source = "../../modules/cognito"
   name   = "shopcloud"
+
+  # Cognito's Hosted UI strictly checks redirect_uri against this allow-list.
+  # The storefront constructs its redirect from `location.origin + pathname`
+  # (see frontend/cognito.js), so the URL we register must match exactly.
+  #
+  # Wired from module.edge so any change to the CloudFront domain (e.g.
+  # adding a custom domain later) updates Cognito automatically. Falls back
+  # to the placeholder defaults when edge is not yet provisioned (Step 8
+  # not done yet).
+  customer_callback_urls = try(
+    [
+      "https://${module.edge[0].cloudfront_domain_name}/",
+      "https://${module.edge[0].cloudfront_domain_name}/callback",
+    ],
+    ["https://shopcloud.local/callback"]
+  )
+  customer_logout_urls = try(
+    ["https://${module.edge[0].cloudfront_domain_name}/"],
+    ["https://shopcloud.local/"]
+  )
+
+  # Admin path is intentionally unchanged for now -- admin lives behind the
+  # internal ALB / VPN, not CloudFront. When the VPN is wired up the admin
+  # callback URL will be the VPN-fronted hostname for the admin Ingress.
 }
 
 # ============================================================================
@@ -367,12 +391,16 @@ module "edge" {
   primary_region   = var.region
   secondary_region = "us-east-1"
 
-  # Two-pass apply: first apply has frontend_bucket_regional_domain_name = ""
-  # (the s3_frontend module references the CloudFront distribution which doesn't
-  # yet exist). Second apply, with this string set to the bucket's regional
-  # domain, adds the S3 origin + behaviors. Terraform handles the dependency
-  # via the `count` guard on s3_frontend; just apply twice on first deploy.
-  frontend_bucket_regional_domain_name = try(module.s3_frontend[0].bucket_regional_domain_name, "")
+  # Two-pass apply: pass 1 hardcodes "" (the s3_frontend module references
+  # CloudFront which does not yet exist). Pass 2 swaps to the actual bucket
+  # domain from the s3_frontend module output, which adds the S3 origin +
+  # behaviors to the distribution. Terraform's planner cannot resolve a
+  # `try(module.s3_frontend[0]....)` inside a chained `count` boundary, so
+  # the swap is a manual one-line edit between applies.
+  #
+  # PASS 1:  frontend_bucket_regional_domain_name = ""
+  # PASS 2:  frontend_bucket_regional_domain_name = module.s3_frontend[0].bucket_regional_domain_name
+  frontend_bucket_regional_domain_name = module.s3_frontend[0].bucket_regional_domain_name
 }
 
 # ============================================================================

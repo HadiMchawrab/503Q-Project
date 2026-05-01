@@ -982,15 +982,535 @@ Unchanged. GitHub-side configuration only.
 Delete the secrets/variables/environments in the GitHub UI. No AWS
 resources are touched.
 
-## Step 6 — First push / deploy (not yet done)
+## Step 6 — First push / deploy to dev
 
-To be filled in when executed.
+**Status: done.** All 6 Deployments are healthy on the dev cluster. The CI
+workflow (`.github/workflows/deploy.yml`) ran end-to-end after several
+real bugs were fixed along the way -- documented below as a sequence so
+a future operator hitting the same errors can map symptom -> fix.
 
-## Step 7 — Cluster autoscaler + KEDA (not yet done)
+### Pre-push CI workflow gaps fixed in deploy.yml
 
-To be filled in when executed.
+Before the first push, three holes in the workflow were patched:
 
-## Step 8 — Terraform second pass (CloudFront + storefront) (not yet done)
+1. **`invoice-worker` image was never built/pushed.** Added a prod-gated
+   `Build invoice-worker image` step using
+   [`services/invoice_worker/Dockerfile`](../services/invoice_worker/Dockerfile),
+   plus a prod-gated push.
+2. **`invoice-worker-sa-patch.yaml` placeholder ARN was never substituted.**
+   Added a parallel `sed` next to the existing `checkout-sa-patch.yaml`
+   substitution.
+3. **More terraform outputs were needed downstream.** Added `INVOICES_BUCKET`,
+   `DB_HOST`, `DB_SECRET_ARN`, `INVOICE_WORKER_IRSA_ROLE_ARN`, and later
+   `REDIS_HOST` to the `Read terraform outputs` step. Added a prod-gated
+   block that writes these into the `shopcloud-config` ConfigMap so the
+   invoice-worker pod has its env vars.
+4. **`invoice-worker` was missing from `Wait for rollout`.** Added it
+   (prod-only) to the rollout list.
 
-To be filled in when executed.
-trigger
+### Iteration history (fail -> fix sequence)
+
+The first deploy failed in seven distinct ways across as many push cycles.
+None were typos; each was a real architectural or config gap. Recording
+them so the next operator does not have to re-derive each fix.
+
+#### Iter 1 — `commonLabels` deprecation warning + first errors
+
+Workflow ran `kustomize edit set image` and bailed with a confusing
+`cannot unmarshal object into Go struct field
+ConfigMapArgs.configMapGenerator.literals of type string` error. Looked
+like a YAML parse issue but turned out to be the symptom of the next iter.
+
+#### Iter 2 — `kustomize edit add configmap` cannot replace literals
+
+```
+Error: failed to create configmap: configmap shopcloud-config
+illegally repeats the key 'INVOICE_QUEUE_URL'
+```
+
+`kustomize edit add configmap --behavior=merge --from-literal=KEY=value`
+*appends* a new entry; it does not replace an existing one. Both overlays
+pre-listed `INVOICE_QUEUE_URL`, Cognito IDs, etc. in their `literals:`
+blocks. CI then tried to add the same keys -> duplicate -> fail at apply.
+
+**Fix:** strip pre-listed literals from both overlays. Keep only keys CI
+does NOT touch (`CART_KEY_PREFIX`). Make CI's value env-conditional in
+`deploy.yml` so dev gets `INVOICE_QUEUE_URL=""` (preserving the no-op
+design where dev does not publish invoice events to prod's SQS).
+
+#### Iter 3 — `kustomize edit add secret` does NOT accept `--behavior`
+
+```
+Error: unknown flag: --behavior
+```
+
+In kustomize 5.4.x, `add secret` and `add configmap` have different flag
+sets. Same duplicate-key issue applied to `DATABASE_URL` in `secretGenerator`.
+
+**Fix:** strip `DATABASE_URL` from both overlays' `secretGenerator.literals`,
+keep the surrounding block (`behavior: merge`, `literals: []`) so CI's
+`kustomize edit add secret NAME --from-literal=DATABASE_URL=...` (no
+`--behavior` flag) appends into an existing block that already declares
+the merge intent.
+
+#### Iter 4 — Path traversal blocked by kustomize security
+
+```
+Error: accumulating resources from '../app-configmap.yaml':
+security; file '/.../k8s/app-configmap.yaml' is not in or below
+'/.../k8s/base'
+```
+
+[`k8s/base/kustomization.yaml`](../k8s/base/kustomization.yaml) referenced
+`../app-configmap.yaml` (one directory up). Kustomize blocks this by
+default -- a kustomization should not load resources outside its root.
+
+**Fix:** moved `k8s/app-configmap.yaml` -> `k8s/base/app-configmap.yaml`
+and updated the reference. The file's natural home is inside the base
+anyway; the previous placement was just wrong.
+
+#### Iter 5 — EKS authentication: CI role unknown to the cluster
+
+```
+the server has asked for the client to provide credentials
+```
+
+`aws eks update-kubeconfig` succeeded (it just writes a kubeconfig file).
+But `kubectl diff` failed because the cluster did not recognise the
+`gh-actions-shopcloud-dev` IAM role. The cluster was in `CONFIG_MAP`
+authentication mode, and the only entry in `aws-auth` was the EKS node role.
+
+**Fix (out-of-band):** edited the `aws-auth` ConfigMap directly (run from
+the cluster creator's user, who has `system:masters` from cluster bootstrap),
+adding both `gh-actions-shopcloud-dev` and `gh-actions-shopcloud-prod` to
+`system:masters`. The full ConfigMap is committed at [`aws-auth.yaml`](../aws-auth.yaml)
+in the repo root for reproducibility.
+
+```bash
+aws eks update-kubeconfig --name shopcloud --region eu-west-1
+kubectl apply -f aws-auth.yaml
+```
+
+**To migrate later:** switch the cluster to `API_AND_CONFIG_MAP` mode and
+manage access via Terraform `aws_eks_access_entry` resources -- modern
+replacement for the ConfigMap.
+
+#### Iter 6 — KEDA CRDs not installed
+
+```
+no matches for kind "ScaledObject" in version "keda.sh/v1alpha1"
+ensure CRDs are installed first
+```
+
+[`k8s/base/keda-invoice-scaler.yaml`](../k8s/base/keda-invoice-scaler.yaml)
+references `ScaledObject` and `TriggerAuthentication` from `keda.sh/v1alpha1`,
+but KEDA itself was never installed.
+
+**Fix (out-of-band):**
+
+```bash
+kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+```
+
+Installs KEDA CRDs + operator + admission webhook + metrics-apiserver into
+a `keda` namespace. ~3 pods, all in `kube-system`/`keda`. Documented as
+part of Step 7 below.
+
+#### Iter 7 — Pods crash: database does not exist + Redis cannot connect
+
+After CI applied successfully, all 5 backend pods were in `CrashLoopBackOff`:
+
+- **auth/catalog/admin/checkout** - `InvalidCatalogNameError: database
+  "shopcloud_dev" does not exist`. Step 4 had set
+  `create_per_env_databases = false` because Terraform runs from a laptop
+  outside the VPC and cannot reach private RDS. Per-env databases were
+  meant to be created post-deploy from inside the cluster.
+- **cart/checkout** - `Could not connect to Redis: ConnectionError(...)`,
+  pointed at `redis://redis:6379` (the in-cluster default), but Redis
+  is ElastiCache, not in-cluster.
+- After fixing the Redis URL, cart/checkout still hung at "Waiting for
+  application startup." -- ElastiCache has `TransitEncryptionEnabled=true`
+  so plain `redis://` hangs on the TLS handshake without a clear error.
+
+**Fixes:**
+
+1. Created the per-env databases via in-cluster psql:
+
+   ```bash
+   PASS=$(aws secretsmanager get-secret-value \
+     --secret-id shopcloud/rds/password \
+     --region eu-west-1 \
+     --query SecretString --output text)
+
+   kubectl run psql-bootstrap --rm -i --restart=Never \
+     --image=postgres:16 --env="PGPASSWORD=$PASS" -- \
+     psql -h shopcloud-postgres.cjqo0amu2gx6.eu-west-1.rds.amazonaws.com \
+       -U shopcloud -d shopcloud \
+       -c "CREATE DATABASE shopcloud_prod" \
+       -c "CREATE DATABASE shopcloud_dev"
+   ```
+
+   Note: `CREATE DATABASE` cannot run inside a transaction, so each
+   database needs its own `-c`. PowerShell users: `psql` URL parsing
+   percent-decodes the password -- if your password has `%`, pass it via
+   `PGPASSWORD` env var (not in the URL).
+
+2. Removed the broken `redis://redis:6379` placeholder from
+   [`k8s/base/secrets.yaml`](../k8s/base/secrets.yaml) -- now an empty
+   stringData. CI writes the real value via `kustomize edit add secret`.
+
+3. Added `REDIS_HOST` to terraform outputs read in `deploy.yml`, then
+   appended `--from-literal=REDIS_URL='rediss://${REDIS_HOST}:6379'` to
+   the `kustomize edit add secret` call. **`rediss://` (double-s) is
+   required** because ElastiCache has TLS-in-transit on.
+
+4. Applied [`database/init.sql`](../database/init.sql) into `shopcloud_dev`
+   to create the schema (4 tables, 5 indexes) and seed 12 products. The
+   file is idempotent (`CREATE TABLE IF NOT EXISTS`). See Step 7 for the
+   command.
+
+### Verification
+
+After all fixes:
+
+```
+$ kubectl -n dev get pods
+admin-...        1/1 Running 0
+admin-ui-...     1/1 Running 0
+auth-...         1/1 Running 0
+cart-...         1/1 Running 0
+catalog-...      1/1 Running 0
+checkout-...     1/1 Running 0
+```
+
+End-to-end:
+
+```
+$ curl http://k8s-dev-shopclou-...elb.amazonaws.com/api/auth/health
+{"success":true,"service":"auth","status":"healthy",...}
+
+$ curl http://k8s-dev-shopclou-...elb.amazonaws.com/api/catalog/products
+{"success":true,"products":[{"id":"...","sku":"LAP-001","name":"CloudBook Pro 14",...}, ...]}
+```
+
+12 seed products returned correctly.
+
+### Repo changes for Step 6
+
+```
+.github/workflows/deploy.yml      EDITED -- invoice-worker build/push,
+                                  prod-gated CI logic, REDIS_URL,
+                                  invoice-worker SA patch, more outputs
+k8s/base/kustomization.yaml       EDITED -- ../app-configmap.yaml moved in
+k8s/base/app-configmap.yaml       NEW (moved from k8s/app-configmap.yaml)
+k8s/base/secrets.yaml             EDITED -- removed broken REDIS_URL default
+k8s/overlays/dev/kustomization.yaml   EDITED -- stripped pre-listed literals
+k8s/overlays/prod/kustomization.yaml  EDITED -- same
+aws-auth.yaml                     NEW (committed at repo root for reproducibility)
+```
+
+---
+
+## Step 7 — Platform components (KEDA, AWS Load Balancer Controller)
+
+**Status: done** for KEDA and the AWS Load Balancer Controller.
+Cluster Autoscaler is **not yet installed** -- the Terraform IRSA role
+exists ([`shopcloud-cluster-autoscaler`](../infra/terraform/environments/prod/main.tf#L244-L253))
+and a manifest exists at [`k8s/platform/cluster-autoscaler.yaml`](../k8s/platform/cluster-autoscaler.yaml),
+but neither has been applied. Listed as an open issue below.
+
+These components live inside the cluster but are infrastructure, not
+application workloads. They get applied once and left alone.
+
+### KEDA
+
+KEDA scales the `invoice-worker` Deployment based on SQS queue depth (see
+[`k8s/base/keda-invoice-scaler.yaml`](../k8s/base/keda-invoice-scaler.yaml)).
+Without KEDA the workflow's `kubectl apply` fails on `ScaledObject` /
+`TriggerAuthentication` resources because their CRDs don't exist.
+
+```bash
+kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+```
+
+After install:
+
+```
+$ kubectl -n keda get pods
+keda-admission-...           1/1 Running
+keda-metrics-apiserver-...   1/1 Running
+keda-operator-...            1/1 Running
+
+$ kubectl get crd | grep keda
+cloudeventsources.eventing.keda.sh
+clustertriggerauthentications.keda.sh
+scaledjobs.keda.sh
+scaledobjects.keda.sh
+triggerauthentications.keda.sh
+```
+
+### AWS Load Balancer Controller
+
+Without this, **every Ingress sits forever with an empty `ADDRESS` column**
+-- there is nothing watching Ingress resources to provision an ALB in AWS.
+This was a real gap in the original Terraform: it created the cluster and
+a `cluster-autoscaler` IRSA role but never an `aws-load-balancer-controller`
+IRSA role or any install path.
+
+**Terraform addition** (committed): added `module "irsa_alb_controller"`
+in [`prod/main.tf`](../infra/terraform/environments/prod/main.tf) following
+the same pattern as the autoscaler IRSA. The IAM policy is the
+AWS-published canonical policy for controller v2.7+, embedded in
+[`prod/alb-controller-policy.json`](../infra/terraform/environments/prod/alb-controller-policy.json)
+so apply does not depend on a runtime fetch. New output `alb_controller_role_arn`.
+
+**Install (out-of-band, via Helm):**
+
+```bash
+# Helm not in CI yet -- run from a laptop after `terraform apply`
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --namespace kube-system \
+  --set clusterName=shopcloud \
+  --set serviceAccount.create=true \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=$(terraform output -raw alb_controller_role_arn)" \
+  --set region=eu-west-1 \
+  --set vpcId=$(aws eks describe-cluster --name shopcloud --region eu-west-1 --query 'cluster.resourcesVpcConfig.vpcId' --output text) \
+  --wait --timeout 5m
+```
+
+After ~90s, the existing `shopcloud` and `shopcloud-admin` Ingresses get
+ALB DNS names:
+
+```
+$ kubectl -n dev get ingress
+NAME              CLASS   ADDRESS                                                                       PORTS  AGE
+shopcloud         <none>  k8s-dev-shopclou-87dea12e5c-408364913.eu-west-1.elb.amazonaws.com             80     ...
+shopcloud-admin   <none>  internal-k8s-dev-shopclou-ac784317e3-1047783942.eu-west-1.elb.amazonaws.com   80     ...
+```
+
+The admin ALB is `internal-` -- not internet-facing -- per the architecture
+(admin lives behind VPN). The customer-facing storefront ALB is
+internet-facing.
+
+### Per-env database schema (post-Step 4 cleanup)
+
+The schema and 12 seed products were applied to `shopcloud_dev` from inside
+the cluster:
+
+```bash
+PASS=$(aws secretsmanager get-secret-value --secret-id shopcloud/rds/password --region eu-west-1 --query SecretString --output text)
+
+Get-Content database/init.sql -Raw | \
+  kubectl run psql-init --rm -i --restart=Never \
+    --image=postgres:16 --env="PGPASSWORD=$PASS" -- \
+    psql -h shopcloud-postgres.cjqo0amu2gx6.eu-west-1.rds.amazonaws.com \
+      -U shopcloud -d shopcloud_dev
+```
+
+The file uses `CREATE TABLE IF NOT EXISTS` and `INSERT ON CONFLICT DO NOTHING`
+so re-running it is safe.
+
+### Open issues for Step 7
+
+1. **Cluster Autoscaler not installed.** Manifest is in
+   [`k8s/platform/cluster-autoscaler.yaml`](../k8s/platform/cluster-autoscaler.yaml).
+   Apply with `kubectl apply -f` after substituting the IRSA role ARN from
+   `terraform output cluster_autoscaler_role_arn`.
+2. **Helm install of LBC happens on a laptop, not in CI.** A new operator
+   running `terraform destroy && terraform apply` on a fresh account would
+   end up with empty Ingress addresses until they manually install the
+   controller. Should be added to `deploy.yml` as a one-time bootstrap
+   step (idempotent: `helm upgrade --install`).
+3. **DB schema migration is manual.** Should be a Kubernetes Job applied
+   by `deploy.yml` that runs `psql < init.sql` against the right per-env
+   database. The file is already idempotent.
+4. **`aws-auth` ConfigMap edits are out-of-band.** Future cluster recreates
+   would lose the CI role mappings. Migrate to EKS Access Entries (cluster
+   `authenticationMode = API_AND_CONFIG_MAP`) and manage via Terraform.
+
+---
+
+## Step 8 — Terraform second pass (CloudFront + storefront)
+
+**Status: done.** Storefront live at <https://d2jxslqwyxyr7f.cloudfront.net/>.
+HTML served from S3 via CloudFront, `/api/*` proxies to the public ALB.
+
+This step adds the public face of the application: a CloudFront distribution
+in front of the existing public ALB, plus an S3 bucket holding the storefront
+static assets ([`frontend/`](../frontend/)). Before this step, the only way
+to reach the cluster was the raw ALB DNS, which has no `/` route so the
+homepage returned 404.
+
+### Architecture (after this step)
+
+```
+Customer browser
+     │
+     ▼
+CloudFront distribution  d2jxslqwyxyr7f.cloudfront.net  (default *.cloudfront.net cert)
+     ├── default behavior  -> S3 bucket  shopcloud-frontend-621721788004
+     │                       (static frontend: index.html, app.js, admin.js,
+     │                        cognito.js, styles.css, assets/products/*)
+     │                       Origin Access Control signs CloudFront -> S3 with SigV4
+     │                       so the bucket can stay fully private.
+     │
+     └── /api/* behavior   -> public ALB
+                              k8s-dev-shopclou-87dea12e5c-408364913.eu-west-1.elb.amazonaws.com
+                              -> Ingress shopcloud (dev namespace)
+                              -> Services (auth, catalog, cart, checkout)
+```
+
+### terraform.tfvars change
+
+```hcl
+public_alb_dns_name = "k8s-dev-shopclou-87dea12e5c-408364913.eu-west-1.elb.amazonaws.com"
+domain_name         = ""    # no custom domain yet
+hosted_zone_id      = ""    # no Route53 records
+```
+
+The empty `domain_name` + `hosted_zone_id` keep the edge module on
+CloudFront's default `*.cloudfront.net` cert ([`modules/edge/main.tf:212`](../infra/terraform/modules/edge/main.tf#L212)).
+A custom domain + ACM cert can be added later without rebuilding anything --
+just point a CNAME at `d2jxslqwyxyr7f.cloudfront.net`, set
+`domain_name = "shop.example.com"` + `hosted_zone_id = "Z..."` in tfvars,
+and re-apply.
+
+### Two-pass apply (with workaround)
+
+The edge module references `module.s3_frontend[0].bucket_regional_domain_name`,
+and `s3_frontend` itself depends on `module.edge[0].cloudfront_distribution_arn`.
+Both modules are `count`-gated. Terraform's planner cannot resolve a
+`try(module.s3_frontend[0]....)` inside a chained `count` boundary -- plan
+fails with:
+
+```
+Error: Invalid count argument
+The "count" value depends on resource attributes that cannot be determined
+until apply, so Terraform cannot predict how many instances will be created.
+```
+
+The original code at [`prod/main.tf:375`](../infra/terraform/environments/prod/main.tf#L375)
+expected this to "just work" with a `try()` wrapper, but it does not.
+**Workaround: edit the line by hand between the two passes.**
+
+```hcl
+# PASS 1 (creates CloudFront with ALB-only origin + the S3 bucket itself):
+frontend_bucket_regional_domain_name = ""
+
+# PASS 2 (adds the S3 bucket as a CloudFront origin via OAC):
+frontend_bucket_regional_domain_name = module.s3_frontend[0].bucket_regional_domain_name
+```
+
+The comment in main.tf has been updated to flag this manual swap explicitly
+so the next operator does not get stuck.
+
+### Resources added on the first pass
+
+```
+Plan: 7 to add, 1 to change, 0 to destroy.
+```
+
+| Resource | Purpose |
+|---|---|
+| `module.edge[0].aws_cloudfront_distribution.this` | The distribution itself, ALB-only origin (3m53s to deploy globally) |
+| `module.edge[0].aws_wafv2_web_acl.cloudfront` | OWASP managed rule sets + rate limiting; lives in `us-east-1` (CloudFront WAFs are us-east-1-only) |
+| `module.s3_frontend[0].aws_s3_bucket.this` | Storefront bucket (`shopcloud-frontend-621721788004`) |
+| `module.s3_frontend[0].aws_s3_bucket_policy.this` | Allows the OAC principal to `s3:GetObject` |
+| `module.s3_frontend[0].aws_s3_bucket_public_access_block.this` | All four flags true |
+| `module.s3_frontend[0].aws_s3_bucket_server_side_encryption_configuration.this` | SSE-S3 |
+| `module.s3_frontend[0].aws_s3_bucket_versioning.this` | Versioning on |
+
+### Resources added on the second pass
+
+```
+Plan: 2 to add, 1 to change, 0 to destroy.
+```
+
+| Resource | Action | Purpose |
+|---|---|---|
+| `module.edge[0].aws_cloudfront_origin_access_control.s3_frontend[0]` | Create | OAC -- replaces the older OAI mechanism. CloudFront signs requests to S3 with SigV4 so the bucket can stay fully private. |
+| `module.edge[0].aws_cloudfront_distribution.this` | Update in-place | Adds the S3 origin + default behavior (everything not matching `/api/*` goes to S3) |
+| `module.lambda_invoice.aws_security_group_rule.lambda_to_rds` | Recurring drift | Cosmetic, ignore |
+
+### Storefront content sync (manual, this run)
+
+After pass 1 the bucket existed but was empty. Synced manually from the
+laptop while pass 2 was deploying CloudFront's update (independent operations,
+fine in parallel):
+
+```powershell
+aws s3 sync frontend/ s3://shopcloud-frontend-621721788004/ `
+  --delete `
+  --exclude index.html `
+  --cache-control "public, max-age=31536000, immutable" `
+  --region eu-west-1
+
+aws s3 cp frontend/index.html s3://shopcloud-frontend-621721788004/index.html `
+  --cache-control "no-cache, no-store, must-revalidate" `
+  --region eu-west-1
+
+aws cloudfront create-invalidation `
+  --distribution-id E2MG6ZMHW85S76 `
+  --paths "/*"
+```
+
+The `Sync storefront to S3` step in
+[`deploy.yml`](../.github/workflows/deploy.yml#L194-L217) was a no-op until
+this point because `FRONTEND_BUCKET=""`. Now that `terraform output -raw
+frontend_bucket_name` returns a real value, the next CI push will upload
+the latest `frontend/` contents automatically and invalidate the cache.
+
+### Verification
+
+```
+$ curl -i https://d2jxslqwyxyr7f.cloudfront.net/
+HTTP/2 200
+content-type: text/html
+content-length: 8576
+<!doctype html>...
+
+$ curl -i https://d2jxslqwyxyr7f.cloudfront.net/api/catalog/products
+HTTP/2 200
+content-type: application/json
+{"success":true,"products":[{"id":"...","sku":"LAP-001","name":"CloudBook Pro 14",...}, ...]}
+```
+
+Same domain, same TLS cert, both static and API endpoints reachable. The
+homepage loads, JS calls `/api/catalog/products`, and 12 seed products
+render.
+
+### Live values (post-Step 8)
+
+| Output | Value |
+|---|---|
+| `cloudfront_distribution_id` | `E2MG6ZMHW85S76` |
+| `cloudfront_domain_name` | `d2jxslqwyxyr7f.cloudfront.net` |
+| `frontend_bucket_name` | `shopcloud-frontend-621721788004` |
+
+### Open issues for Step 8
+
+1. **Two-pass workaround is hand-edited.** The `frontend_bucket_regional_domain_name`
+   line in [`prod/main.tf`](../infra/terraform/environments/prod/main.tf)
+   alternates between `""` and `module.s3_frontend[0].bucket_regional_domain_name`
+   on bootstrap. After the second apply the line stays as the module
+   reference -- subsequent applies are no-ops on this resource. But if
+   a fresh operator does `terraform destroy && apply`, they hit the same
+   `Invalid count argument` error and have to re-do the swap. Long-term
+   fix: refactor the edge module to take an explicit `enable_s3_origin` bool
+   variable instead of inferring presence from a string-truthiness check.
+2. **No custom domain.** Anyone with the `*.cloudfront.net` URL can reach
+   the storefront, but it's not a memorable domain. To wire one:
+   - Verify ownership of the domain in Route53 (or another DNS provider)
+   - Request an ACM cert in `us-east-1` (CloudFront cert region)
+   - Set `domain_name` + `hosted_zone_id` in tfvars
+   - `terraform apply` -- the edge module adds Route53 A/AAAA aliases and
+     swaps `cloudfront_default_certificate = true` for the ACM cert
+3. **WAF rate limit is fixed at module defaults.** [`modules/edge/main.tf`](../infra/terraform/modules/edge/main.tf)
+   sets a single rate-based rule. For real prod, parameterise the limit
+   and add a Bot Control managed rule.
+
+
