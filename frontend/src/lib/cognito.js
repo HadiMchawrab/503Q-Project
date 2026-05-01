@@ -59,8 +59,13 @@ export async function getMode() {
   return data.mode || 'cognito'
 }
 
+// All flows redirect back to a single dedicated path. This must exactly
+// match an entry in the Cognito app client's callback URL allow-list (managed
+// in infra/terraform/.../main.tf -> module "cognito" -> customer_callback_urls).
+// A fixed path keeps the allow-list small even as new pages add sign-in CTAs.
+const CALLBACK_PATH = '/callback'
 function redirectUri() {
-  return location.origin + location.pathname
+  return location.origin + CALLBACK_PATH
 }
 
 export async function startLogin(audience) {
