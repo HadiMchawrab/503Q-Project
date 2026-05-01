@@ -39,11 +39,14 @@ configMapGenerator:
 
 # DATABASE_URL is generated here so the prod password never lives in git.
 # CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL
+# DATABASE_URL is NOT pre-listed because `kustomize edit add secret` (in
+# kustomize 5.4.x) only appends — pre-listing causes "illegally repeats the
+# key" at apply. The block stays so `behavior: merge` is preserved when CI
+# appends DATABASE_URL.
 secretGenerator:
   - name: shopcloud-secrets
     behavior: merge
-    literals:
-      - DATABASE_URL=REPLACE_WITH_TERRAFORM_OUTPUT_RDS_URL_PROD
+    literals: []
 
 # IRSA annotations on the service accounts that need AWS permissions.
 patches:

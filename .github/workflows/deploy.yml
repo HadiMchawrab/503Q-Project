@@ -271,8 +271,10 @@ jobs:
 
           # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
           #     the shared RDS instance based on the resolved environment.
+          #     `kustomize edit add secret` (5.4.x) does NOT accept --behavior;
+          #     the overlay's secretGenerator already declares behavior: merge,
+          #     and this command appends DATABASE_URL into that existing block.
           kustomize edit add secret shopcloud-secrets \
-            --behavior=merge \
             --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}'
 
           # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
