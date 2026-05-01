@@ -10,6 +10,9 @@ data:
   AUTH_SERVICE_URL: "http://auth:3004"
   ADMIN_SERVICE_URL: "http://admin:3005"
   AWS_REGION: "eu-west-1"
+  # CART_KEY_PREFIX namespaces Redis keys per environment so dev and prod
+  # carts don't collide on the same ElastiCache instance. Overlays override.
+  CART_KEY_PREFIX: "cart:"
   # INVOICE_QUEUE_URL is set per-environment via the kustomize overlay
   # (terraform output -raw invoice_queue_url).
   # Cognito values come from terraform outputs and are merged in by the overlay.

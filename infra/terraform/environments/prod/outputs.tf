@@ -21,6 +21,21 @@ output "rds_endpoint" {
   value       = module.data.rds_endpoint
 }
 
+# Per-environment Postgres URLs. Both databases live on the same instance —
+# isolation is at the Postgres database level, not the instance level.
+# CI consumes these to set DATABASE_URL on each K8s overlay's Secret.
+output "rds_url_prod" {
+  description = "Connection URL for the prod K8s namespace's database."
+  value       = lookup(module.data.rds_environment_database_urls, "shopcloud_prod", "")
+  sensitive   = true
+}
+
+output "rds_url_dev" {
+  description = "Connection URL for the dev K8s namespace's database."
+  value       = lookup(module.data.rds_environment_database_urls, "shopcloud_dev", "")
+  sensitive   = true
+}
+
 output "redis_endpoint" {
   description = "Redis primary endpoint for application config."
   value       = module.data.redis_endpoint

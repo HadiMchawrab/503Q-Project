@@ -21,13 +21,23 @@ images:
     newName: REPLACE_WITH_ECR_URL/admin-ui
     newTag: placeholder-set-by-ci
 
-# Set INVOICE_QUEUE_URL from terraform output. CI runs:
-#   kustomize edit add configmap shopcloud-config --from-literal=INVOICE_QUEUE_URL=$URL
+# Per-environment config overrides. CI fills the placeholders from terraform
+# outputs before applying. CART_KEY_PREFIX namespaces Redis keys for prod;
+# the DATABASE_URL in shopcloud-secrets points at the shopcloud_prod database.
 configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
       - INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT
+      - CART_KEY_PREFIX=cart:prod:
+
+# DATABASE_URL is generated here so the prod password never lives in git.
+# CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL
+secretGenerator:
+  - name: shopcloud-secrets
+    behavior: merge
+    literals:
+      - DATABASE_URL=REPLACE_WITH_TERRAFORM_OUTPUT_RDS_URL_PROD
 
 # IRSA annotation on the checkout service account.
 patches:

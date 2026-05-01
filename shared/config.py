@@ -31,6 +31,9 @@ class Settings:
         "postgres://shopcloud:shopcloud@postgres:5432/shopcloud",
     )
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379")
+    # Per-env Redis key prefix so dev and prod carts don't collide when sharing
+    # an ElastiCache instance. Overlays set this to "cart:dev:" or "cart:prod:".
+    cart_key_prefix: str = os.getenv("CART_KEY_PREFIX", "cart:")
 
     catalog_service_url: str = os.getenv("CATALOG_SERVICE_URL", "http://catalog:3001")
     cart_service_url: str = os.getenv("CART_SERVICE_URL", "http://cart:3002")

@@ -22,11 +22,22 @@ images:
 # Dev does NOT process invoices — leaving INVOICE_QUEUE_URL empty makes
 # checkout's publish_invoice_event a no-op (see shared/queue.py).
 # Avoids dev orders sending real emails through the prod SQS/Lambda/SES path.
+# CART_KEY_PREFIX namespaces Redis keys so dev and prod carts don't collide
+# on the shared ElastiCache instance.
 configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
       - INVOICE_QUEUE_URL=
+      - CART_KEY_PREFIX=cart:dev:
+
+# DATABASE_URL points dev pods at the shopcloud_dev database on the shared RDS.
+# CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL
+secretGenerator:
+  - name: shopcloud-secrets
+    behavior: merge
+    literals:
+      - DATABASE_URL=REPLACE_WITH_TERRAFORM_OUTPUT_RDS_URL_DEV
 
 patches:
   - path: checkout-sa-patch.yaml

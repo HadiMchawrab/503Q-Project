@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from shared.config import settings
 from shared.redis_client import client
 
 
 def _key(user_id: str) -> str:
-    return f"cart:{user_id}"
+    return f"{settings.cart_key_prefix}{user_id}"
 
 
 async def get_cart(user_id: str) -> dict[str, Any]:

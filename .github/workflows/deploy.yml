@@ -166,6 +166,16 @@ jobs:
           terraform init -input=false -backend=true >/dev/null
 
           out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
+          ENV="${{ needs.resolve.outputs.environment }}"
+
+          # DATABASE_URL is per-environment — both prod and dev share the same
+          # RDS instance but use different databases (shopcloud_prod / shopcloud_dev).
+          if [[ "$ENV" == "prod" ]]; then
+            DB_URL=$(out rds_url_prod)
+          else
+            DB_URL=$(out rds_url_dev)
+          fi
+
           {
             echo "INVOICE_QUEUE_URL=$(out invoice_queue_url)"
             echo "COGNITO_USER_POOL_ID=$(out cognito_customer_pool_id)"
@@ -177,6 +187,8 @@ jobs:
             echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
             echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
             echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
+            # GitHub masks this in logs because it's marked sensitive.
+            echo "DATABASE_URL=$DB_URL"
           } >> "$GITHUB_OUTPUT"
 
       - name: Sync storefront to S3
@@ -225,6 +237,12 @@ jobs:
             --from-literal=COGNITO_ADMIN_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_CLIENT_ID }}' \
             --from-literal=COGNITO_CUSTOMER_DOMAIN='${{ steps.tf_out.outputs.COGNITO_CUSTOMER_DOMAIN }}' \
             --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}'
+
+          # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
+          #     the shared RDS instance based on the resolved environment.
+          kustomize edit add secret shopcloud-secrets \
+            --behavior=merge \
+            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}'
 
           # 3) Patch the IRSA role ARN onto the checkout ServiceAccount.
           #    The overlay already references checkout-sa-patch.yaml; we just

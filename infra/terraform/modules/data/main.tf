@@ -1,5 +1,24 @@
 # RDS Postgres (Multi-AZ) and ElastiCache Redis (Multi-AZ).
 # Both placed in the database subnets, both locked to ingress from the EKS node SG only.
+#
+# Per-environment data isolation (Option 1, same instance):
+# This module also provisions one Postgres database per logical environment
+# (default: shopcloud_prod, shopcloud_dev) on the SAME RDS instance. Pods in
+# the prod namespace connect to shopcloud_prod; dev pods connect to shopcloud_dev.
+# The master db_name (`shopcloud`) is created by RDS but not used by the app.
+
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    postgresql = {
+      source  = "cyrilgdn/postgresql"
+      version = "~> 1.22"
+    }
+  }
+}
 
 # ============================================================================
 # RDS POSTGRES
@@ -53,6 +72,42 @@ resource "aws_db_instance" "this" {
   skip_final_snapshot     = true # set to false in real prod
 
   tags = { Name = "${var.name}-postgres" }
+}
+
+# ----------------------------------------------------------------------------
+# Per-environment Postgres databases on the same instance.
+#
+# IMPORTANT: this provisioner connects to RDS. RDS lives in private subnets,
+# so the machine running `terraform apply` must be able to reach
+# aws_db_instance.this.address — typically a bastion host or a CI runner with
+# VPC access. From a laptop outside the VPC this WILL HANG until timeout.
+# If you can't reach RDS, set var.create_per_env_databases = false and run
+# the CREATE DATABASE statements manually from a bastion.
+# ----------------------------------------------------------------------------
+provider "postgresql" {
+  alias            = "rds"
+  host             = aws_db_instance.this.address
+  port             = aws_db_instance.this.port
+  database         = aws_db_instance.this.db_name # default master DB
+  username         = var.db_username
+  password         = var.db_password
+  sslmode          = "require"
+  connect_timeout  = 15
+  superuser        = false
+  expected_version = "16"
+}
+
+resource "postgresql_database" "per_env" {
+  for_each = var.create_per_env_databases ? toset(var.environment_databases) : toset([])
+  provider = postgresql.rds
+
+  name              = each.key
+  owner             = var.db_username
+  template          = "template0"
+  lc_collate        = "C"
+  lc_ctype          = "C"
+  connection_limit  = -1
+  allow_connections = true
 }
 
 # ============================================================================
