@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import bcrypt
 import jwt
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from shared import db
 from shared.config import settings
 from shared.errors import AppError
+from shared.ids import parse_uuid
 
 
 _bearer = HTTPBearer(auto_error=False)
 
-# Cognito JWKS clients are cached per-pool. PyJWKClient handles fetch + key rotation.
 _jwks_clients: dict[str, jwt.PyJWKClient] = {}
 
 
@@ -34,54 +33,67 @@ def normalize_email(email: str | None) -> str:
     return str(email or "").strip().lower()
 
 
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
-
-
-def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
-
-
-def sign_token(user: dict[str, Any]) -> str:
-    now = datetime.now(timezone.utc)
-    payload = {
-        "sub": str(user["id"]),
-        "email": user["email"],
-        "name": user["name"],
-        "role": user["role"],
-        "iss": settings.jwt_issuer,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(hours=settings.jwt_expiration_hours)).timestamp()),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
-
-
 def verify_token(raw_token: str) -> dict[str, Any]:
-    # Prefer Cognito (RS256 + JWKS) when configured; fall back to local HS256 for dev.
-    try:
-        if settings.cognito_user_pool_id:
-            for pool_id in filter(None, [settings.cognito_user_pool_id, settings.cognito_admin_pool_id]):
-                try:
-                    signing_key = _jwks_client_for(pool_id).get_signing_key_from_jwt(raw_token).key
-                    return jwt.decode(
-                        raw_token,
-                        signing_key,
-                        algorithms=["RS256"],
-                        issuer=_cognito_issuer(pool_id),
-                        options={"verify_aud": False},
-                    )
-                except jwt.PyJWTError:
-                    continue
-            raise AppError(401, "INVALID_TOKEN", "Invalid or expired token")
+    """Validate a Cognito-issued RS256 JWT and return claims with a derived `role`.
 
-        return jwt.decode(
-            raw_token,
-            settings.jwt_secret,
-            algorithms=["HS256"],
-            issuer=settings.jwt_issuer,
+    Role is determined by which pool issued the token: tokens from the admin pool
+    get role="admin", tokens from the customer pool get role="customer". Pool config
+    must be present — there is no local fallback.
+    """
+    if not settings.cognito_user_pool_id and not settings.cognito_admin_pool_id:
+        raise AppError(
+            500,
+            "AUTH_NOT_CONFIGURED",
+            "Cognito pool IDs are not configured",
         )
-    except jwt.PyJWTError as exc:
-        raise AppError(401, "INVALID_TOKEN", "Invalid or expired token") from exc
+
+    pools = [
+        ("customer", settings.cognito_user_pool_id),
+        ("admin", settings.cognito_admin_pool_id),
+    ]
+    for role, pool_id in pools:
+        if not pool_id:
+            continue
+        try:
+            signing_key = _jwks_client_for(pool_id).get_signing_key_from_jwt(raw_token).key
+            claims = jwt.decode(
+                raw_token,
+                signing_key,
+                algorithms=["RS256"],
+                issuer=_cognito_issuer(pool_id),
+                options={"verify_aud": False},
+            )
+            claims["role"] = role
+            return claims
+        except jwt.PyJWTError:
+            continue
+
+    raise AppError(401, "INVALID_TOKEN", "Invalid or expired token")
+
+
+async def upsert_user_from_claims(claims: dict[str, Any]) -> None:
+    """Mirror Cognito identity into the local users table.
+
+    Called from current_user on every authenticated request. ON CONFLICT keeps
+    name/email in sync if the user updates them in Cognito.
+    """
+    sub = parse_uuid(claims["sub"], "user id")
+    email = normalize_email(claims.get("email"))
+    name = (claims.get("name") or claims.get("cognito:username") or email).strip()
+    if not email or not name:
+        raise AppError(401, "INCOMPLETE_CLAIMS", "Token missing email or name")
+
+    await db.execute(
+        """
+        INSERT INTO users (id, name, email)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO UPDATE
+        SET name = EXCLUDED.name, email = EXCLUDED.email
+        """,
+        sub,
+        name,
+        email,
+    )
 
 
 async def current_user(
@@ -89,7 +101,9 @@ async def current_user(
 ) -> dict[str, Any]:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AppError(401, "MISSING_TOKEN", "Authorization token is required")
-    return verify_token(credentials.credentials)
+    claims = verify_token(credentials.credentials)
+    await upsert_user_from_claims(claims)
+    return claims
 
 
 def require_role(role: str):

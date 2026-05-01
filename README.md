@@ -74,7 +74,7 @@ Endpoints:
 | localhost:55432           | Postgres                                   |
 | localhost:6380            | Redis                                      |
 
-Invoice/SQS/SES flow is no-op'd locally: leave `INVOICE_QUEUE_URL` empty and `checkout` skips publishing (see [shared/queue.py](shared/queue.py)). Auth falls back to local HS256 JWTs signed with `JWT_SECRET` when Cognito vars are unset.
+Invoice/SQS/SES flow is no-op'd locally: leave `INVOICE_QUEUE_URL` empty and `checkout` skips publishing (see [shared/queue.py](shared/queue.py)). Auth requires Cognito — set `COGNITO_USER_POOL_ID` (and/or `COGNITO_ADMIN_POOL_ID`) in `.env`; without them every authenticated request returns 500.
 
 ## Deploying
 

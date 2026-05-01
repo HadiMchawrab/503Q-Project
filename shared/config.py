@@ -14,14 +14,6 @@ class Settings:
     port: int = int(os.getenv("PORT", "3000"))
     root_path: str = os.getenv("ROOT_PATH", "")
 
-    jwt_secret: str = os.getenv("JWT_SECRET", "change-me-in-production")
-    jwt_issuer: str = os.getenv("JWT_ISSUER", "shopcloud-local-auth")
-    jwt_expiration_hours: int = int(os.getenv("JWT_EXPIRATION_HOURS", "8"))
-
-    admin_email: str = os.getenv("ADMIN_EMAIL", "admin@shopcloud.local")
-    admin_password: str = os.getenv("ADMIN_PASSWORD", "Admin123!")
-    admin_name: str = os.getenv("ADMIN_NAME", "ShopCloud Admin")
-
     database_url: str = os.getenv(
         "DATABASE_URL",
         "postgres://shopcloud:shopcloud@postgres:5432/shopcloud",
@@ -37,8 +29,8 @@ class Settings:
     aws_region: str = os.getenv("AWS_REGION", "eu-west-1")
     invoice_queue_url: str = os.getenv("INVOICE_QUEUE_URL", "")
 
-    # Cognito — when COGNITO_USER_POOL_ID is set, services validate RS256 JWTs
-    # against the pool's JWKS instead of the local HS256 secret.
+    # Cognito — required. Services validate RS256 JWTs against these pools'
+    # JWKS endpoints. Token issuer determines role (admin pool → admin).
     cognito_user_pool_id: str = os.getenv("COGNITO_USER_POOL_ID", "")
     cognito_admin_pool_id: str = os.getenv("COGNITO_ADMIN_POOL_ID", "")
     cognito_client_id: str = os.getenv("COGNITO_CLIENT_ID", "")
