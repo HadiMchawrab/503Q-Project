@@ -72,11 +72,45 @@ jobs:
           fi
 
   # ----------------------------------------------------------------------------
+  # Validate the local stack before building/pushing deployable images.
+  # This reuses the existing end-to-end smoke test against docker-compose.
+  # ----------------------------------------------------------------------------
+  test:
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+
+      - name: Create CI env file
+        run: cp .env.example .env
+
+      - name: Start local stack
+        run: docker compose up -d --build gateway admin
+
+      - name: Run smoke test
+        run: python scripts/smoke.py
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down local stack
+        if: always()
+        run: docker compose down -v
+
+  # ----------------------------------------------------------------------------
   # Build + push both images. Tag with the short Git SHA — ECR is IMMUTABLE
   # so the same SHA can never be overwritten.
   # ----------------------------------------------------------------------------
   build:
-    needs: resolve
+    needs: [resolve, test]
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.image_tag }}
