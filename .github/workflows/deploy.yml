@@ -157,6 +157,37 @@ jobs:
             -t "$ECR_REGISTRY/invoice-worker:${{ steps.tag.outputs.image_tag }}" \
             .
 
+      - name: Scan shopcloud-app image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.ECR_REGISTRY }}/shopcloud-app:${{ steps.tag.outputs.image_tag }}"
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Scan admin-ui image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.ECR_REGISTRY }}/admin-ui:${{ steps.tag.outputs.image_tag }}"
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Scan invoice-worker image with Trivy
+        if: needs.resolve.outputs.environment == 'prod'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ env.ECR_REGISTRY }}/invoice-worker:${{ steps.tag.outputs.image_tag }}"
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
       - name: Push images
         if: needs.resolve.outputs.should_deploy == 'true'
         env:
@@ -182,23 +213,115 @@ jobs:
           fi
 
   # ----------------------------------------------------------------------------
-  # Apply the right kustomize overlay against EKS.
-  # PRs skip this entirely; only push-to-dev / push-to-main deploy.
+  # Deploy to the dev namespace. Runs for every push (dev branch and main).
+  # main-branch pushes use this as a staging gate before prod.
   # ----------------------------------------------------------------------------
-  deploy:
+  deploy_dev:
     needs: [resolve, build]
     if: needs.resolve.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
-    # GitHub Environments add: required reviewers (for prod), env-scoped secrets,
-    # and a deployment record on each run. Configure these in repo settings.
-    environment: ${{ needs.resolve.outputs.environment }}
+    environment: dev
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ needs.resolve.outputs.environment == 'prod' && secrets.ROLE_TO_ASSUME_PROD || secrets.ROLE_TO_ASSUME_DEV }}
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: "5.4.3"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Read terraform outputs
+        id: tf_out
+        working-directory: infra/terraform/environments/prod
+        run: |
+          set -euo pipefail
+          terraform init -input=false -backend=true >/dev/null
+
+          out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
+
+          {
+            echo "COGNITO_USER_POOL_ID=$(out cognito_customer_pool_id)"
+            echo "COGNITO_ADMIN_POOL_ID=$(out cognito_admin_pool_id)"
+            echo "COGNITO_CLIENT_ID=$(out cognito_customer_client_id)"
+            echo "COGNITO_ADMIN_CLIENT_ID=$(out cognito_admin_client_id)"
+            echo "COGNITO_CUSTOMER_DOMAIN=$(out cognito_customer_hosted_ui_domain)"
+            echo "COGNITO_ADMIN_DOMAIN=$(out cognito_admin_hosted_ui_domain)"
+            echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
+            echo "REDIS_HOST=$(out redis_endpoint)"
+            echo "DATABASE_URL=$(out rds_url_dev)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure overlay
+        working-directory: k8s/overlays/dev
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.image_tag }}"
+
+          kustomize edit set image "shopcloud-app=$ECR_REGISTRY/shopcloud-app:$TAG"
+          kustomize edit set image "admin-ui=$ECR_REGISTRY/admin-ui:$TAG"
+
+          kustomize edit add configmap shopcloud-config \
+            --behavior=merge \
+            --from-literal=INVOICE_QUEUE_URL="" \
+            --from-literal=COGNITO_USER_POOL_ID='${{ steps.tf_out.outputs.COGNITO_USER_POOL_ID }}' \
+            --from-literal=COGNITO_ADMIN_POOL_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_POOL_ID }}' \
+            --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
+            --from-literal=COGNITO_ADMIN_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_CLIENT_ID }}' \
+            --from-literal=COGNITO_CUSTOMER_DOMAIN='${{ steps.tf_out.outputs.COGNITO_CUSTOMER_DOMAIN }}' \
+            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}'
+
+          kustomize edit add secret shopcloud-secrets \
+            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}' \
+            --from-literal=REDIS_URL='rediss://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
+
+          sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout|${{ steps.tf_out.outputs.CHECKOUT_IRSA_ROLE_ARN }}|g" \
+            checkout-sa-patch.yaml
+
+      - name: Diff (informational)
+        working-directory: k8s/overlays/dev
+        run: kustomize build . | kubectl diff -f - || true
+
+      - name: Apply
+        working-directory: k8s/overlays/dev
+        run: kustomize build . | kubectl apply -f -
+
+      - name: Wait for rollout
+        run: |
+          for d in auth catalog cart checkout admin admin-ui; do
+            kubectl -n dev rollout status deployment/$d --timeout=5m
+          done
+
+  # ----------------------------------------------------------------------------
+  # Deploy to prod — only on main, only after dev deploy succeeds.
+  # The "prod" GitHub Environment enforces required reviewers if configured.
+  # ----------------------------------------------------------------------------
+  deploy_prod:
+    needs: [resolve, build, deploy_dev]
+    if: >
+      github.ref == 'refs/heads/main' &&
+      needs.resolve.outputs.should_deploy == 'true' &&
+      needs.deploy_dev.result == 'success'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ROLE_TO_ASSUME_PROD }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
@@ -220,30 +343,13 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Read terraform outputs
-        # The values that change per environment (queue URL, Cognito IDs, IRSA
-        # role ARN) are owned by terraform. Read them straight from the state
-        # via `terraform output` — no extra layer to keep in sync.
-        # Requires the runner's IAM role to have read access to the terraform
-        # state backend (S3 bucket + DynamoDB lock table).
         id: tf_out
-        working-directory: infra/terraform/environments/${{ needs.resolve.outputs.environment == 'prod' && 'prod' || 'prod' }}
-        # NOTE: dev currently shares the prod terraform environment. When a
-        # dedicated infra/terraform/environments/dev is added, switch the
-        # working-directory expression above to use the resolved environment.
+        working-directory: infra/terraform/environments/prod
         run: |
           set -euo pipefail
           terraform init -input=false -backend=true >/dev/null
 
           out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
-          ENV="${{ needs.resolve.outputs.environment }}"
-
-          # DATABASE_URL is per-environment — both prod and dev share the same
-          # RDS instance but use different databases (shopcloud_prod / shopcloud_dev).
-          if [[ "$ENV" == "prod" ]]; then
-            DB_URL=$(out rds_url_prod)
-          else
-            DB_URL=$(out rds_url_dev)
-          fi
 
           {
             echo "INVOICE_QUEUE_URL=$(out invoice_queue_url)"
@@ -258,20 +364,13 @@ jobs:
             echo "INVOICES_BUCKET=$(out invoice_bucket_name)"
             echo "DB_HOST=$(out rds_endpoint)"
             echo "DB_SECRET_ARN=$(out db_secret_arn)"
-            # ElastiCache primary endpoint, used to build REDIS_URL for both envs.
             echo "REDIS_HOST=$(out redis_endpoint)"
             echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
             echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
-            # GitHub masks this in logs because it's marked sensitive.
-            echo "DATABASE_URL=$DB_URL"
+            echo "DATABASE_URL=$(out rds_url_prod)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Sync storefront to S3
-        # CloudFront → S3 serves the static frontend. Two passes:
-        #   1) sync hashed/long-lived assets with a 1-year immutable cache
-        #   2) sync index.html with no-cache so users always pick up the latest
-        #      reference to the hashed asset bundle
-        # Skipped if terraform hasn't provisioned the bucket yet (first deploy).
         if: steps.tf_out.outputs.FRONTEND_BUCKET != ''
         run: |
           BUCKET="${{ steps.tf_out.outputs.FRONTEND_BUCKET }}"
@@ -295,101 +394,51 @@ jobs:
           fi
 
       - name: Configure overlay
-        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
-        env:
-          ENV: ${{ needs.resolve.outputs.environment }}
+        working-directory: k8s/overlays/prod
         run: |
           set -euo pipefail
           TAG="${{ needs.build.outputs.image_tag }}"
 
-          # 1) Pin app/admin-ui images. invoice-worker is prod-only because
-          #    the dev overlay does not include the worker Deployment.
           kustomize edit set image "shopcloud-app=$ECR_REGISTRY/shopcloud-app:$TAG"
           kustomize edit set image "admin-ui=$ECR_REGISTRY/admin-ui:$TAG"
-          if [[ "$ENV" == "prod" ]]; then
-            kustomize edit set image "invoice-worker=$ECR_REGISTRY/invoice-worker:$TAG"
-          fi
+          kustomize edit set image "invoice-worker=$ECR_REGISTRY/invoice-worker:$TAG"
 
-          # 2) Merge env-specific config into the shopcloud-config ConfigMap.
-          #    Dev gets INVOICE_QUEUE_URL='' so checkout's publish_invoice_event
-          #    is a no-op (avoids dev orders going through the prod SQS path).
-          #    Cognito values are the same across envs (one user pool per kind).
-          if [[ "$ENV" == "prod" ]]; then
-            INVOICE_QUEUE_URL_VAL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}'
-          else
-            INVOICE_QUEUE_URL_VAL=''
-          fi
           kustomize edit add configmap shopcloud-config \
             --behavior=merge \
-            --from-literal=INVOICE_QUEUE_URL="$INVOICE_QUEUE_URL_VAL" \
+            --from-literal=INVOICE_QUEUE_URL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}' \
             --from-literal=COGNITO_USER_POOL_ID='${{ steps.tf_out.outputs.COGNITO_USER_POOL_ID }}' \
             --from-literal=COGNITO_ADMIN_POOL_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_POOL_ID }}' \
             --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
             --from-literal=COGNITO_ADMIN_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_CLIENT_ID }}' \
             --from-literal=COGNITO_CUSTOMER_DOMAIN='${{ steps.tf_out.outputs.COGNITO_CUSTOMER_DOMAIN }}' \
-            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}'
+            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}' \
+            --from-literal=INVOICES_BUCKET='${{ steps.tf_out.outputs.INVOICES_BUCKET }}' \
+            --from-literal=SES_SENDER='hadi.mchawrab24@gmail.com' \
+            --from-literal=DB_HOST='${{ steps.tf_out.outputs.DB_HOST }}' \
+            --from-literal=DB_NAME='shopcloud_prod' \
+            --from-literal=DB_USER='shopcloud' \
+            --from-literal=DB_SECRET_ARN='${{ steps.tf_out.outputs.DB_SECRET_ARN }}'
 
-          # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
-          #     the shared RDS instance based on the resolved environment.
-          #     REDIS_URL points at the ElastiCache primary endpoint (same for
-          #     both envs; carts are namespaced via CART_KEY_PREFIX).
-          #     `kustomize edit add secret` (5.4.x) does NOT accept --behavior;
-          #     the overlay's secretGenerator already declares behavior: merge,
-          #     and this command appends into that existing block.
-          # rediss:// (TLS) — ElastiCache has TransitEncryptionEnabled=true,
-          # so plain redis:// connections hang on the TLS handshake without
-          # surfacing a clear error.
           kustomize edit add secret shopcloud-secrets \
             --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}' \
             --from-literal=REDIS_URL='rediss://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
 
-          # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
-          #     DB_HOST/NAME/USER/SECRET_ARN. The base placeholders are
-          #     REPLACE_WITH_TERRAFORM_OUTPUT — overwrite them here.
-          if [[ "$ENV" == "prod" ]]; then
-            kustomize edit add configmap shopcloud-config \
-              --behavior=merge \
-              --from-literal=INVOICES_BUCKET='${{ steps.tf_out.outputs.INVOICES_BUCKET }}' \
-              --from-literal=SES_SENDER='hadi.mchawrab24@gmail.com' \
-              --from-literal=DB_HOST='${{ steps.tf_out.outputs.DB_HOST }}' \
-              --from-literal=DB_NAME='shopcloud_prod' \
-              --from-literal=DB_USER='shopcloud' \
-              --from-literal=DB_SECRET_ARN='${{ steps.tf_out.outputs.DB_SECRET_ARN }}'
-          fi
-
-          # 3) Patch the IRSA role ARN onto the checkout ServiceAccount.
-          #    The overlay already references checkout-sa-patch.yaml; we just
-          #    rewrite the placeholder ARN inline so it never gets committed.
           sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout|${{ steps.tf_out.outputs.CHECKOUT_IRSA_ROLE_ARN }}|g" \
             checkout-sa-patch.yaml
 
-          # 3b) Same for invoice-worker (prod-only — dev overlay has no patch).
-          if [[ "$ENV" == "prod" ]]; then
-            sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-invoice-worker|${{ steps.tf_out.outputs.INVOICE_WORKER_IRSA_ROLE_ARN }}|g" \
-              invoice-worker-sa-patch.yaml
-          fi
+          sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-invoice-worker|${{ steps.tf_out.outputs.INVOICE_WORKER_IRSA_ROLE_ARN }}|g" \
+            invoice-worker-sa-patch.yaml
 
       - name: Diff (informational)
-        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
-        run: |
-          # `kubectl diff` exits 1 when there ARE differences — that's expected
-          # for a deploy, so don't fail the step on that.
-          kustomize build . | kubectl diff -f - || true
+        working-directory: k8s/overlays/prod
+        run: kustomize build . | kubectl diff -f - || true
 
       - name: Apply
-        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        working-directory: k8s/overlays/prod
         run: kustomize build . | kubectl apply -f -
 
       - name: Wait for rollout
-        env:
-          ENV: ${{ needs.resolve.outputs.environment }}
         run: |
-          NS="${{ needs.resolve.outputs.namespace }}"
-          DEPLOYMENTS="auth catalog cart checkout admin admin-ui"
-          # invoice-worker is prod-only (no Deployment exists in dev overlay).
-          if [[ "$ENV" == "prod" ]]; then
-            DEPLOYMENTS="$DEPLOYMENTS invoice-worker"
-          fi
-          for d in $DEPLOYMENTS; do
-            kubectl -n "$NS" rollout status deployment/$d --timeout=5m
+          for d in auth catalog cart checkout admin admin-ui invoice-worker; do
+            kubectl -n prod rollout status deployment/$d --timeout=5m
           done
