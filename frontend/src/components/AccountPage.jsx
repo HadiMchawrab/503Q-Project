@@ -19,7 +19,7 @@ const TABS = [
 function CognitoSignInPanel({ onStart, error }) {
   return (
     <div className="signin-box">
-      <h2 className="signin-title">Sign in to 503Q</h2>
+      <h2 className="signin-title">Sign in to ShopCloud</h2>
       <p className="signin-hint">
         You'll be taken to our secure sign-in page to enter your email and password.
       </p>
