@@ -12,7 +12,28 @@ resource "aws_cognito_user_pool" "customers" {
     require_uppercase = true
   }
 
+  # `email` must be both auto-verified AND a username alias for the Hosted UI
+  # signup form to render an email input. Without alias_attributes Cognito
+  # treats username as opaque and skips the email field, then the verification
+  # send fails because the user has no email -> 302 to the generic /error page.
   auto_verified_attributes = ["email"]
+  alias_attributes         = ["email"]
+
+  # Schema attributes are immutable after pool creation. `Required = true`
+  # on email forces the Hosted UI signup form to render an email input box
+  # and prevents writing user records without one.
+  schema {
+    name                     = "email"
+    attribute_data_type      = "String"
+    required                 = true
+    mutable                  = true
+    developer_only_attribute = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 2048
+    }
+  }
 
   account_recovery_setting {
     recovery_mechanism {
@@ -52,6 +73,27 @@ resource "aws_cognito_user_pool" "admins" {
     require_numbers   = true
     require_symbols   = true
     require_uppercase = true
+  }
+
+  # Same email-as-alias / required-email reasoning as the customer pool.
+  # Admins are admin-created (allow_admin_create_user_only = true below) so
+  # the Hosted UI signup form is never used here -- but keeping the schema
+  # consistent across pools means shared/auth.py JWT validation logic does
+  # not need to handle two different shapes.
+  auto_verified_attributes = ["email"]
+  alias_attributes         = ["email"]
+
+  schema {
+    name                     = "email"
+    attribute_data_type      = "String"
+    required                 = true
+    mutable                  = true
+    developer_only_attribute = false
+
+    string_attribute_constraints {
+      min_length = 1
+      max_length = 2048
+    }
   }
 
   mfa_configuration = "ON"
