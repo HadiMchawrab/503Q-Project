@@ -15,6 +15,7 @@ guard in verify_token.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -27,6 +28,8 @@ from shared import db
 from shared.config import settings
 from shared.errors import AppError
 from shared.ids import parse_uuid
+
+logger = logging.getLogger(__name__)
 
 
 _bearer = HTTPBearer(auto_error=False)
@@ -138,6 +141,15 @@ async def upsert_user_from_claims(claims: dict[str, Any]) -> None:
 
     Skipped in local-dev mode — /register and /login already INSERT directly into
     `users`, so the row exists by the time the token is verified.
+
+    Conflict handling: the users table has UNIQUE constraints on BOTH `id` and
+    `email`. The naive ON CONFLICT (id) raised UniqueViolation 500s when a
+    stale row existed under a different id with the same email (e.g. legacy
+    local-dev row, or a row from a previous Cognito pool). We use email as
+    the conflict target since email is the alias_attribute on the Cognito
+    pool: one email -> one user, regardless of which sub Cognito assigned.
+    On conflict we keep the existing id (foreign keys from orders/etc still
+    point to it) and only refresh the display name.
     """
     if local_dev_enabled():
         return
@@ -152,8 +164,8 @@ async def upsert_user_from_claims(claims: dict[str, Any]) -> None:
         """
         INSERT INTO users (id, name, email)
         VALUES ($1, $2, $3)
-        ON CONFLICT (id) DO UPDATE
-        SET name = EXCLUDED.name, email = EXCLUDED.email
+        ON CONFLICT (email) DO UPDATE
+        SET name = EXCLUDED.name
         """,
         sub,
         name,
@@ -167,7 +179,21 @@ async def current_user(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise AppError(401, "MISSING_TOKEN", "Authorization token is required")
     claims = verify_token(credentials.credentials)
-    await upsert_user_from_claims(claims)
+    # Anything unexpected during the user-mirror upsert (DB connectivity hiccup,
+    # malformed Cognito claim, missing email on a token from a stale pool) used
+    # to bubble up as a 500 with no traceback in pod logs. Convert to a clean
+    # 401 + log the real exception so the failure mode is debuggable.
+    try:
+        await upsert_user_from_claims(claims)
+    except AppError:
+        raise
+    except Exception:
+        logger.exception(
+            "upsert_user_from_claims failed for sub=%s email=%s",
+            claims.get("sub"),
+            claims.get("email"),
+        )
+        raise AppError(401, "SESSION_REJECTED", "Could not establish session from token")
     return claims
 
 
