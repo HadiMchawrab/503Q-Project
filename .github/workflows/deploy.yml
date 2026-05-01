@@ -203,6 +203,8 @@ jobs:
             echo "INVOICES_BUCKET=$(out invoice_bucket_name)"
             echo "DB_HOST=$(out rds_endpoint)"
             echo "DB_SECRET_ARN=$(out db_secret_arn)"
+            # ElastiCache primary endpoint, used to build REDIS_URL for both envs.
+            echo "REDIS_HOST=$(out redis_endpoint)"
             echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
             echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
             # GitHub masks this in logs because it's marked sensitive.
@@ -271,11 +273,14 @@ jobs:
 
           # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
           #     the shared RDS instance based on the resolved environment.
+          #     REDIS_URL points at the ElastiCache primary endpoint (same for
+          #     both envs; carts are namespaced via CART_KEY_PREFIX).
           #     `kustomize edit add secret` (5.4.x) does NOT accept --behavior;
           #     the overlay's secretGenerator already declares behavior: merge,
-          #     and this command appends DATABASE_URL into that existing block.
+          #     and this command appends into that existing block.
           kustomize edit add secret shopcloud-secrets \
-            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}'
+            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}' \
+            --from-literal=REDIS_URL='redis://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
 
           # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
           #     DB_HOST/NAME/USER/SECRET_ARN. The base placeholders are
