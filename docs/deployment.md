@@ -993,5 +993,4 @@ To be filled in when executed.
 ## Step 8 — Terraform second pass (CloudFront + storefront) (not yet done)
 
 To be filled in when executed.
-t r i g g e r  
- 
+trigger

@@ -253,6 +253,30 @@ module "irsa_cluster_autoscaler" {
 }
 
 # ----------------------------------------------------------------------------
+# IRSA -- AWS Load Balancer Controller. The controller (a Deployment in
+# kube-system installed via Helm by deploy.yml) watches Ingress and Service
+# resources, and provisions ALBs/NLBs in AWS to expose them. Without this
+# role, the controller can't call the elasticloadbalancing/ec2/iam APIs and
+# every Ingress sits forever with an empty ADDRESS column.
+#
+# Policy is the AWS-published canonical policy for controller v2.7+
+# (compatible with v2.8.x). Sourced from
+# https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+# and embedded as alb-controller-policy.json so apply does not depend on
+# fetching at runtime.
+# ----------------------------------------------------------------------------
+module "irsa_alb_controller" {
+  source = "../../modules/iam_irsa"
+
+  role_name            = "shopcloud-alb-controller"
+  namespace            = "kube-system"
+  service_account_name = "aws-load-balancer-controller"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_provider_url    = module.eks.oidc_provider_url
+  policy_json          = file("${path.module}/alb-controller-policy.json")
+}
+
+# ----------------------------------------------------------------------------
 # IRSA — invoice-worker pod (KEDA-scaled SQS consumer). Mirror of the Lambda
 # permissions: receive/delete from the invoice queue, write to the invoice
 # bucket, send via SES, read the DB password from Secrets Manager. Same
