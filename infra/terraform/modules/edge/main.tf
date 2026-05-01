@@ -25,8 +25,18 @@ terraform {
 resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.us_east_1
 
-  name  = "${var.name}-cloudfront"
-  scope = "CLOUDFRONT"
+  # name_prefix instead of name avoids the destroy/recreate race when the
+  # caller renames `var.name` (e.g. shopcloud -> shopcloud-dev for env-keyed
+  # modules). With name_prefix, AWS appends a random suffix; new WAFs can be
+  # created while the old one still exists, then `lifecycle.create_before_destroy`
+  # below guarantees CloudFront is attached to the new WAF before the old one
+  # is destroyed.
+  name_prefix = "${var.name}-cloudfront-"
+  scope       = "CLOUDFRONT"
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   default_action {
     allow {}

@@ -340,67 +340,100 @@ module "cognito" {
   # adding a custom domain later) updates Cognito automatically. Falls back
   # to the placeholder defaults when edge is not yet provisioned (Step 8
   # not done yet).
-  customer_callback_urls = try(
-    [
-      "https://${module.edge[0].cloudfront_domain_name}/",
-      "https://${module.edge[0].cloudfront_domain_name}/callback",
-    ],
-    ["https://shopcloud.local/callback"]
-  )
-  customer_logout_urls = try(
-    ["https://${module.edge[0].cloudfront_domain_name}/"],
-    ["https://shopcloud.local/"]
-  )
+  # Both prod and dev CloudFront URLs end up in the customer pool's allow-list
+  # so users can sign in from either. Single Cognito pool across envs is
+  # intentional -- it lets a user signed up via dev also sign in via prod
+  # (helpful for demos, harmless because the cluster is shared anyway).
+  customer_callback_urls = length(module.edge) > 0 ? flatten([
+    for env, edge in module.edge : [
+      "https://${edge.cloudfront_domain_name}/",
+      "https://${edge.cloudfront_domain_name}/callback",
+    ]
+  ]) : ["https://shopcloud.local/callback"]
 
-  # Admin path is intentionally unchanged for now -- admin lives behind the
-  # internal ALB / VPN, not CloudFront. When the VPN is wired up the admin
-  # callback URL will be the VPN-fronted hostname for the admin Ingress.
+  customer_logout_urls = length(module.edge) > 0 ? [
+    for env, edge in module.edge : "https://${edge.cloudfront_domain_name}/"
+  ] : ["https://shopcloud.local/"]
+
+  # Admin callback URLs cover both the VPN-reachable internal ALB hostname
+  # (when admins connect via Client VPN) and localhost (when admins
+  # port-forward via kubectl for break-glass access).
+  #
+  # The internal ALB DNS is currently hardcoded -- it changes if the ALB
+  # is replaced. For real prod, swap to a stable Route53 alias in a
+  # private hosted zone (e.g. admin.internal.shopcloud) and reference that
+  # via a Terraform output.
+  admin_callback_urls = [
+    "https://internal-k8s-prod-shopclou-912c413a33-1214551243.eu-west-1.elb.amazonaws.com/",
+    "https://internal-k8s-prod-shopclou-912c413a33-1214551243.eu-west-1.elb.amazonaws.com/callback",
+    "https://localhost/",
+    "https://localhost/callback",
+  ]
+  admin_logout_urls = [
+    "https://internal-k8s-prod-shopclou-912c413a33-1214551243.eu-west-1.elb.amazonaws.com/",
+    "https://localhost/",
+  ]
 }
 
 # ============================================================================
-# STOREFRONT — Static assets in S3, served via CloudFront (OAC).
-# CI does `aws s3 sync frontend/ s3://<bucket>` and invalidates the cache.
-# The bucket is private; only the CloudFront distribution can read it.
+# STOREFRONT + EDGE -- one CloudFront distribution + one S3 storefront bucket
+# per environment, keyed by env name (prod, dev). Each environment gets its
+# own URL backed by its own ALB:
+#
+#   <prod cloudfront>.cloudfront.net  -> prod ALB -> prod namespace pods
+#   <dev cloudfront>.cloudfront.net   -> dev  ALB -> dev  namespace pods
+#
+# Wiring:
+#   - `var.public_alb_dns_names` is a map(env -> ALB DNS); one CloudFront +
+#     bucket per non-empty entry.
+#   - `var.frontend_origin_enabled` is a map(env -> bool) that controls
+#     whether CloudFront wires the S3 bucket as an origin (the two-pass
+#     dance, see variables.tf).
+#
+# State migration note: the original code shipped a single `module.edge[0]`
+# and `module.s3_frontend[0]`. To keep the existing CloudFront/bucket alive
+# under their new addresses, run before the next plan:
+#   terraform state mv 'module.edge[0]'        'module.edge["dev"]'
+#   terraform state mv 'module.s3_frontend[0]' 'module.s3_frontend["dev"]'
+# (the existing CloudFront points at the dev ALB; renaming preserves it).
 # ============================================================================
 module "s3_frontend" {
-  count  = var.public_alb_dns_name == "" ? 0 : 1
-  source = "../../modules/s3_frontend"
+  for_each = { for env, dns in var.public_alb_dns_names : env => dns if dns != "" }
+  source   = "../../modules/s3_frontend"
 
-  bucket_name                 = "shopcloud-frontend-${data.aws_caller_identity.current.account_id}"
-  cloudfront_distribution_arn = module.edge[0].cloudfront_distribution_arn
+  # The "dev" entry must keep the original bucket name -- bucket names are
+  # immutable and we are state-mv-ing the existing resource into ["dev"].
+  # New environments get a name suffixed with the env to disambiguate.
+  bucket_name = each.key == "dev" ? (
+    "shopcloud-frontend-${data.aws_caller_identity.current.account_id}"
+    ) : (
+    "shopcloud-frontend-${each.key}-${data.aws_caller_identity.current.account_id}"
+  )
+
+  # cloudfront_distribution_arn is deprecated/ignored -- the bucket policy
+  # now scopes by AWS account ID, breaking the edge<->s3_frontend cycle.
+  # Field omitted (defaults to "").
 }
 
-# ============================================================================
-# EDGE — Route 53 latency routing + CloudFront + WAF
-# Two origins: the public ALB (for /api/*) and the storefront S3 bucket
-# (for everything else). When var.public_alb_dns_name is empty the module is
-# skipped and the storefront bucket is also skipped.
-# ============================================================================
 module "edge" {
-  count  = var.public_alb_dns_name == "" ? 0 : 1
-  source = "../../modules/edge"
+  for_each = { for env, dns in var.public_alb_dns_names : env => dns if dns != "" }
+  source   = "../../modules/edge"
   providers = {
     aws           = aws
     aws.us_east_1 = aws.us_east_1
   }
 
-  name             = "shopcloud"
-  alb_dns_name     = var.public_alb_dns_name
+  name             = "shopcloud-${each.key}"
+  alb_dns_name     = each.value
   hosted_zone_id   = var.hosted_zone_id
   domain_name      = var.domain_name
   primary_region   = var.region
   secondary_region = "us-east-1"
 
-  # Two-pass apply: pass 1 hardcodes "" (the s3_frontend module references
-  # CloudFront which does not yet exist). Pass 2 swaps to the actual bucket
-  # domain from the s3_frontend module output, which adds the S3 origin +
-  # behaviors to the distribution. Terraform's planner cannot resolve a
-  # `try(module.s3_frontend[0]....)` inside a chained `count` boundary, so
-  # the swap is a manual one-line edit between applies.
-  #
-  # PASS 1:  frontend_bucket_regional_domain_name = ""
-  # PASS 2:  frontend_bucket_regional_domain_name = module.s3_frontend[0].bucket_regional_domain_name
-  frontend_bucket_regional_domain_name = module.s3_frontend[0].bucket_regional_domain_name
+  # Per-env two-pass: lookup with a `false` default keeps newly-added envs
+  # in pass-1 mode automatically. Flip to true in tfvars after pass 1 has
+  # applied for that env.
+  frontend_bucket_regional_domain_name = lookup(var.frontend_origin_enabled, each.key, false) ? module.s3_frontend[each.key].bucket_regional_domain_name : ""
 }
 
 # ============================================================================
@@ -429,10 +462,16 @@ module "vpn" {
   count  = var.enable_client_vpn ? 1 : 0
   source = "../../modules/vpn"
 
-  name                     = "shopcloud"
-  vpc_id                   = module.network.vpc_id
-  vpc_cidr                 = "10.0.0.0/16"
-  subnet_ids               = module.network.private_subnet_ids
+  name     = "shopcloud"
+  vpc_id   = module.network.vpc_id
+  vpc_cidr = "10.0.0.0/16"
+
+  # Each subnet association costs ~$0.10/hr (~$72/mo) regardless of usage.
+  # Single-AZ is fine for occasional admin access in a learning project.
+  # For real prod, expand this to all 3 private_subnet_ids -- ~$216/mo for
+  # multi-AZ availability so a single-AZ outage cannot lock admins out.
+  subnet_ids = slice(module.network.private_subnet_ids, 0, 1)
+
   acm_server_cert_arn      = var.vpn_server_cert_arn
   acm_client_root_cert_arn = var.vpn_client_root_cert_arn
   # When set, enforces SAML+MFA on top of the client cert. Leave empty for

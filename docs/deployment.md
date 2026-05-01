@@ -1513,4 +1513,259 @@ render.
    sets a single rate-based rule. For real prod, parameterise the limit
    and add a Bot Control managed rule.
 
+---
+
+## Step 9 — Multi-env edge split (one CloudFront per environment)
+
+**Status: done.** Two CloudFront distributions now live, each fronting its
+namespace's ALB:
+
+| Env | URL | Backend ALB | S3 bucket |
+|---|---|---|---|
+| **prod** | <https://d34rcmx9umapdt.cloudfront.net/> | `k8s-prod-shopclou-18dba588f6-...` | `shopcloud-frontend-prod-621721788004` |
+| **dev**  | <https://d2jxslqwyxyr7f.cloudfront.net/>  | `k8s-dev-shopclou-87dea12e5c-...`  | `shopcloud-frontend-621721788004` |
+
+### Why this step exists
+
+After Step 8 we had one CloudFront pointing at the dev ALB. Pushing to
+`main` wired up a separate `prod` namespace with its own Ingress / ALB,
+but there was no way for an end user to reach prod through CloudFront --
+the bare ALB DNS has no `/` route, so prod's storefront was unreachable.
+Two clean ways to fix: refactor the edge module to be `for_each`-keyed
+by env, or repoint the single CloudFront at prod and lose dev's URL.
+We chose the refactor.
+
+### Repo changes
+
+[`prod/main.tf`](../infra/terraform/environments/prod/main.tf): both
+`module "edge"` and `module "s3_frontend"` use `for_each` keyed by the
+new `var.public_alb_dns_names` map. Cognito's `customer_callback_urls`
+and `customer_logout_urls` enumerate all `module.edge[*].cloudfront_domain_name`
+values so a user can sign in from either CloudFront URL. Single Cognito
+pool serves both envs by design (a customer who signed up via dev can
+also sign in via prod -- helpful for demos, harmless because the
+cluster is shared).
+
+[`prod/variables.tf`](../infra/terraform/environments/prod/variables.tf):
+`public_alb_dns_name` (string) replaced with `public_alb_dns_names`
+(`map(string)`). New `frontend_origin_enabled` (`map(bool)`) controls
+the per-env two-pass dance.
+
+[`prod/outputs.tf`](../infra/terraform/environments/prod/outputs.tf):
+plural maps -- `cloudfront_domain_names`, `cloudfront_distribution_ids`,
+`frontend_bucket_names`.
+
+[`modules/s3_frontend/main.tf`](../infra/terraform/modules/s3_frontend/main.tf):
+bucket policy used to scope OAC `aws:SourceArn` to a specific CloudFront
+distribution ARN. With both modules `for_each`-keyed, that creates a
+graph cycle (`edge[*]` -> `s3_frontend[*]` -> `edge[*]`). Switched to
+scoping by `aws:SourceAccount` -- account-level access is sufficient
+for a single-tenant setup. The `cloudfront_distribution_arn` input is
+now deprecated/ignored with a default of `""`.
+
+[`modules/edge/main.tf`](../infra/terraform/modules/edge/main.tf): the
+WAF Web ACL switched from `name = "${var.name}-cloudfront"` to
+`name_prefix = "${var.name}-cloudfront-"` plus
+`lifecycle { create_before_destroy = true }`. Without this, renaming the
+WAF forces destroy/create in that order, and CloudFront's slow propagation
+means the old WAF is still associated when Terraform tries to destroy
+it -> `WAFAssociatedItemException`. With `create_before_destroy`, the
+new WAF is created first, CloudFront swaps to it, and only then is the
+old one destroyed.
+
+### State migration
+
+Existing `module.edge[0]` and `module.s3_frontend[0]` had to be moved
+under their `["dev"]` keys before the next plan, otherwise Terraform
+would have destroyed and recreated both. PowerShell quoting requires
+escaped quotes inside single quotes:
+
+```powershell
+terraform state mv 'module.edge[0]'        'module.edge[\"dev\"]'
+terraform state mv 'module.s3_frontend[0]' 'module.s3_frontend[\"dev\"]'
+```
+
+### Storefront content sync (prod)
+
+After pass 2 the prod CloudFront could route `/` to S3, but the bucket
+was empty. Manually synced once:
+
+```powershell
+aws s3 sync frontend/ s3://shopcloud-frontend-prod-621721788004/ `
+  --delete --exclude index.html `
+  --cache-control "public, max-age=31536000, immutable" `
+  --region eu-west-1
+
+aws s3 cp frontend/index.html s3://shopcloud-frontend-prod-621721788004/index.html `
+  --cache-control "no-cache, no-store, must-revalidate" `
+  --region eu-west-1
+
+aws cloudfront create-invalidation --distribution-id E1V4D3XXWOAAE9 --paths "/*"
+```
+
+### Verification
+
+```
+$ curl -i https://d34rcmx9umapdt.cloudfront.net/
+HTTP/2 200, content-type: text/html
+
+$ curl -i https://d34rcmx9umapdt.cloudfront.net/api/catalog/products
+HTTP/2 200, products[0].id = b4d52728-...     # prod DB
+
+$ curl -i https://d2jxslqwyxyr7f.cloudfront.net/api/catalog/products
+HTTP/2 200, products[0].id = 8de6fac8-...     # dev DB
+```
+
+Different product UUIDs confirm the two URLs hit different backends.
+
+### Open issues for Step 9
+
+1. **`deploy.yml` reads the old singular outputs** (`FRONTEND_BUCKET`,
+   `CLOUDFRONT_DISTRIBUTION_ID`). Update `Read terraform outputs` step
+   to read the new map outputs and pick the entry matching
+   `needs.resolve.outputs.environment`.
+2. **`s3_frontend.cloudfront_distribution_arn` input is deprecated.**
+   Remove the field from the prod main.tf module call in a follow-up.
+3. **No custom domain.** Both URLs are `*.cloudfront.net`. To wire a
+   custom domain per env, add `domain_names` (map) and matching
+   `hosted_zone_id`s.
+
+---
+
+## Step 10 — Client VPN (cert-only)
+
+**Status: in progress.** Certificates generated and uploaded to ACM.
+Terraform module not yet flipped on; AWS VPN client not configured.
+
+This step provisions an AWS Client VPN endpoint so admins can reach the
+internal admin ALB (`internal-k8s-prod-shopclou-...`) which exposes the
+`admin-ui` Deployment. The VPC's private subnets are otherwise unreachable
+from the public internet by design.
+
+### Why cert-only, not Cognito SAML MFA
+
+The original architecture diagram calls for Cognito-federated SAML with
+MFA enforced by the IdP. In practice that path requires either:
+
+- IAM Identity Center as the SAML IdP (corporate-IT-grade setup), or
+- An external IdP like Entra ID / Okta / Google Workspace, or
+- AWS Verified Access (newer service, supersedes Client VPN for some
+  use cases, ~$0.20/hr per endpoint)
+
+For a single-developer learning project, **cert-only authentication** is
+the practical path: each admin holds a personal client cert signed by a
+shared CA. The Client VPN endpoint validates the cert chain. No MFA.
+Acceptable for non-prod; should be upgraded for real prod.
+
+### Step 10a -- generate certificates (done)
+
+Used [easy-rsa](https://github.com/OpenVPN/easy-rsa) v3.1.7 (master
+branch has an `init-pki`/`sign-req` regression on Windows + OpenSSL
+3.2.3 that leaves the CA database file uncreated; pinning to a tagged
+release avoids it).
+
+Ran in Git Bash on the laptop, **outside the project repo** (these are
+private keys; never commit them):
+
+```bash
+mkdir /c/Users/User/vpn-pki
+cd /c/Users/User/vpn-pki
+git clone https://github.com/OpenVPN/easy-rsa.git
+cd easy-rsa
+git checkout v3.1.7
+cd easyrsa3
+
+./easyrsa init-pki
+./easyrsa build-ca nopass                                  # CN: shopcloud-vpn-ca
+./easyrsa --san=DNS:server build-server-full server nopass # server cert
+./easyrsa build-client-full hadi.shopcloud.client nopass   # client cert (one per admin)
+```
+
+Output: 5 files under `pki/`:
+
+```
+pki/ca.crt                                  -- CA root cert
+pki/private/ca.key                          -- CA private key (also the client root)
+pki/issued/server.crt                       -- VPN server cert
+pki/private/server.key                      -- VPN server private key
+pki/issued/hadi.shopcloud.client.crt        -- this admin's client cert
+pki/private/hadi.shopcloud.client.key       -- this admin's client private key
+```
+
+`nopass` skips encrypting the keys -- fine for a single-laptop learning
+setup, NOT for shared/prod.
+
+### Step 10b -- upload certs to ACM (done, eu-west-1)
+
+Two ACM certs imported. Same `ca.crt` is used both as the chain in the
+server cert and as the standalone "client root" cert -- the Client VPN
+endpoint validates that any client cert presented chains back to this
+exact CA.
+
+```bash
+aws acm import-certificate --region eu-west-1 \
+  --certificate     fileb://pki/issued/server.crt \
+  --private-key     fileb://pki/private/server.key \
+  --certificate-chain fileb://pki/ca.crt
+
+aws acm import-certificate --region eu-west-1 \
+  --certificate fileb://pki/ca.crt \
+  --private-key fileb://pki/private/ca.key
+```
+
+Resulting ARNs:
+
+| Cert | ARN |
+|---|---|
+| Server | `arn:aws:acm:eu-west-1:621721788004:certificate/3eb105bc-84a1-4888-9619-cc77c2d8fecb` |
+| Client root CA | `arn:aws:acm:eu-west-1:621721788004:certificate/b5d6cc8a-d944-4818-9108-2cd7ea690f0f` |
+
+The CA cert does not show up in `aws acm list-certificates` summary
+(its CN is `shopcloud-vpn-ca`, no DNS-style DomainName, so AWS omits it
+from the summary). It is verifiable via direct `describe-certificate`
+and is `ISSUED`.
+
+### Step 10c -- Terraform: enable the Client VPN module (NOT YET DONE)
+
+To be filled in when executed. Set in tfvars:
+
+```hcl
+enable_client_vpn        = true
+vpn_server_cert_arn      = "arn:aws:acm:eu-west-1:621721788004:certificate/3eb105bc-84a1-4888-9619-cc77c2d8fecb"
+vpn_client_root_cert_arn = "arn:aws:acm:eu-west-1:621721788004:certificate/b5d6cc8a-d944-4818-9108-2cd7ea690f0f"
+vpn_saml_provider_arn    = ""   # cert-only, no SAML
+```
+
+Then `terraform apply`. Costs ~$0.10/hr while the endpoint exists, plus
+$0.05/hr per connected user. Disassociate the subnet target when not in
+use to stop the bulk of the cost.
+
+### Step 10d -- generate client config + connect (NOT YET DONE)
+
+After `terraform apply`:
+
+```bash
+aws ec2 export-client-vpn-client-configuration \
+  --client-vpn-endpoint-id <id from terraform output> \
+  --region eu-west-1 --output text > shopcloud-vpn.ovpn
+```
+
+Manually edit the `.ovpn` to inject the client cert + key, install the
+AWS VPN Client app, import the config, connect. Once connected, the
+admin URL `internal-k8s-prod-shopclou-...elb.amazonaws.com` resolves to
+a private IP and the admin UI is reachable in the browser.
+
+### Open issues for Step 10
+
+1. **No MFA layer.** Cert-only is acceptable for a learning project but
+   not real prod. Roadmap: federate the admin Cognito pool as a SAML
+   IdP (or use IIC) and set `vpn_saml_provider_arn`.
+2. **Cert revocation list (CRL) not configured.** If a client cert leaks,
+   today the only mitigation is rotating the CA. Adding a CRL via
+   `easyrsa gen-crl` + uploading to S3 + referencing in the VPN endpoint
+   config would make per-cert revocation cheap.
+3. **Pinned to easy-rsa v3.1.7.** Master branch has a regression on
+   Windows + OpenSSL 3.2.3 that breaks `init-pki`. Worth re-trying master
+   in a few months.
+
 

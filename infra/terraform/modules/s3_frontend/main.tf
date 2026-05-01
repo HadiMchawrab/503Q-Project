@@ -37,10 +37,19 @@ resource "aws_s3_bucket_versioning" "this" {
   }
 }
 
-# Bucket policy — only the CloudFront distribution that the caller passes in
-# can read objects. `var.cloudfront_distribution_arn` is a chicken-and-egg with
-# the edge module; resolve it by passing the distribution ARN in after both
-# resources are planned (terraform handles the dependency graph).
+# Bucket policy -- only CloudFront distributions in THIS account can read the
+# bucket. The earlier version locked the policy to a specific distribution
+# ARN passed in by the edge module, but that creates a graph cycle when both
+# modules are `for_each`-keyed (edge[*] -> s3_frontend[*] -> edge[*]).
+#
+# `aws:SourceAccount` is sufficient for a single-tenant setup: only this
+# account's CloudFront distributions can use this bucket as an origin, and
+# CloudFront enforces that only origins explicitly attached to a distribution
+# get its requests. Any other CloudFront distribution in the same account
+# would still need to be explicitly configured with this bucket as an origin
+# (which only the edge module does).
+data "aws_caller_identity" "current" {}
+
 data "aws_iam_policy_document" "cloudfront_read" {
   statement {
     sid     = "AllowCloudFrontRead"
@@ -54,8 +63,8 @@ data "aws_iam_policy_document" "cloudfront_read" {
     }
     condition {
       test     = "StringEquals"
-      variable = "AWS:SourceArn"
-      values   = [var.cloudfront_distribution_arn]
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
     }
   }
 }
