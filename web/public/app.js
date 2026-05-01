@@ -1,5 +1,6 @@
 const state = {
   token: localStorage.getItem('shopcloud_token'),
+  refreshToken: localStorage.getItem('shopcloud_refresh'),
   user: JSON.parse(localStorage.getItem('shopcloud_user') || 'null'),
   categories: [],
   products: [],
@@ -26,8 +27,8 @@ function showMessage(text, type = 'notice') {
   box.textContent = text;
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
+async function rawFetch(path, options) {
+  return fetch(path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -35,6 +36,34 @@ async function api(path, options = {}) {
       ...(options.headers || {})
     }
   });
+}
+
+let refreshInFlight = null;
+
+async function tryRefresh() {
+  // Coalesce concurrent 401s onto a single refresh round-trip.
+  if (!state.refreshToken) return false;
+  if (!refreshInFlight) {
+    refreshInFlight = Cognito.refresh('customer', state.refreshToken)
+      .then((result) => {
+        persistAuth(result.user, result.token, result.expiresAt, result.refreshToken);
+        return true;
+      })
+      .catch(() => {
+        clearAuth();
+        return false;
+      })
+      .finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function api(path, options = {}) {
+  let response = await rawFetch(path, options);
+  if (response.status === 401 && state.refreshToken) {
+    const refreshed = await tryRefresh();
+    if (refreshed) response = await rawFetch(path, options);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error?.message || 'Request failed');
   return data;
@@ -45,21 +74,28 @@ function userInitials(user) {
   return user.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
 }
 
-function persistAuth(user, token) {
+function persistAuth(user, token, expiresAt, refreshToken) {
   state.user = user;
   state.token = token;
   localStorage.setItem('shopcloud_user', JSON.stringify(user));
   localStorage.setItem('shopcloud_token', token);
+  if (expiresAt) localStorage.setItem('shopcloud_token_exp', String(expiresAt));
+  if (refreshToken) {
+    state.refreshToken = refreshToken;
+    localStorage.setItem('shopcloud_refresh', refreshToken);
+  }
   renderUser();
 }
 
-function switchAuthTab(panelId) {
-  document.querySelectorAll('[data-auth-tab]').forEach((item) => {
-    item.classList.toggle('active', item.dataset.authTab === panelId);
-  });
-  document.querySelectorAll('.auth-panel').forEach((panel) => {
-    panel.classList.toggle('active', panel.id === panelId);
-  });
+function clearAuth() {
+  state.user = null;
+  state.token = null;
+  state.refreshToken = null;
+  localStorage.removeItem('shopcloud_user');
+  localStorage.removeItem('shopcloud_token');
+  localStorage.removeItem('shopcloud_token_exp');
+  localStorage.removeItem('shopcloud_refresh');
+  renderUser();
 }
 
 function renderUser() {
@@ -70,7 +106,7 @@ function renderUser() {
     : 'Sign in or register to add products to your cart and place an order.';
   if ($('identityAvatar')) $('identityAvatar').textContent = userInitials(state.user);
   if ($('logoutBtn')) $('logoutBtn').style.display = signedIn ? 'inline-flex' : 'none';
-  if (signedIn) switchAuthTab('signedInPanel');
+  if ($('signInBtn')) $('signInBtn').style.display = signedIn ? 'none' : 'inline-flex';
 }
 
 function updateCartBadge(count = 0) {
@@ -328,8 +364,7 @@ async function loadOrders() {
 
 async function addToCart(productId) {
   if (!state.token) {
-    showMessage('Sign in first to add this item to your cart.', 'error');
-    $('account')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    showMessage('Sign in to add this item to your cart.', 'error');
     return;
   }
   try {
@@ -339,10 +374,6 @@ async function addToCart(productId) {
   } catch (error) {
     showMessage(error.message, 'error');
   }
-}
-
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
 function setButtonLoading(button, isLoading, loadingText = 'Processing...') {
@@ -357,150 +388,43 @@ function setButtonLoading(button, isLoading, loadingText = 'Processing...') {
   }
 }
 
-function passwordScore(password) {
-  let score = 0;
-  if ((password || '').length >= 8) score += 1;
-  if (/[A-Za-z]/.test(password || '')) score += 1;
-  if (/\d/.test(password || '')) score += 1;
-  if (/[^A-Za-z0-9]/.test(password || '')) score += 1;
-  return score;
-}
-
-function updatePasswordMeter() {
-  const password = $('registerPassword')?.value || '';
-  const bar = $('passwordStrengthBar');
-  const checklist = $('passwordChecklist');
-  if (!bar || !checklist) return;
-  const score = passwordScore(password);
-  bar.style.width = `${Math.max(score, password ? 1 : 0) * 25}%`;
-
-  const rules = {
-    length: password.length >= 8,
-    letter: /[A-Za-z]/.test(password),
-    number: /\d/.test(password)
-  };
-  Object.entries(rules).forEach(([rule, passed]) => {
-    const item = checklist.querySelector(`[data-rule="${rule}"]`);
-    if (item) item.classList.toggle('passed', passed);
+async function localAuthRequest(endpoint) {
+  const email = $('localEmail').value.trim();
+  const password = $('localPassword').value;
+  if (!email || !password) throw new Error('Email and password required.');
+  const data = await api(`/api/auth/${endpoint}`, {
+    method: 'POST',
+    body: JSON.stringify({ email, password, name: email.split('@')[0] }),
   });
-}
-
-function validateLoginForm() {
-  if (!isValidEmail($('loginEmail').value)) throw new Error('Please enter a valid email address.');
-  if (!$('loginPassword').value) throw new Error('Please enter your password.');
-}
-
-function validateRegisterForm() {
-  const name = $('registerName').value.trim();
-  const email = $('registerEmail').value.trim();
-  const password = $('registerPassword').value;
-  const confirmPassword = $('registerConfirmPassword')?.value || '';
-  const accepted = $('acceptTerms')?.checked;
-
-  if (name.length < 2) throw new Error('Please enter your full name.');
-  if (!isValidEmail(email)) throw new Error('Please enter a valid email address.');
-  if (password.length < 8) throw new Error('Password must be at least 8 characters.');
-  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new Error('Password should include at least one letter and one number.');
-  if (password !== confirmPassword) throw new Error('Passwords do not match.');
-  if (!accepted) throw new Error('Please confirm the local demo account notice.');
-}
-
-function setupPasswordControls() {
-  document.querySelectorAll('[data-toggle-password]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const input = $(button.dataset.togglePassword);
-      if (!input) return;
-      const isPassword = input.type === 'password';
-      input.type = isPassword ? 'text' : 'password';
-      button.textContent = isPassword ? 'Hide' : 'Show';
-    });
-  });
-  $('registerPassword')?.addEventListener('input', updatePasswordMeter);
-}
-
-function setupAuthHelpers() {
-  $('quickCustomerBtn')?.addEventListener('click', () => {
-    const unique = Date.now().toString().slice(-6);
-    switchAuthTab('registerPanel');
-    $('registerName').value = 'Mansour Allam';
-    $('registerEmail').value = `mansour.customer.${unique}@shopcloud.local`;
-    $('registerPassword').value = 'Customer123!';
-    $('registerConfirmPassword').value = 'Customer123!';
-    $('acceptTerms').checked = true;
-    updatePasswordMeter();
-    showMessage('Test customer details filled. Click Create account.', 'notice');
-  });
-
-  ['loginEmail', 'loginPassword', 'registerName', 'registerEmail', 'registerPassword', 'registerConfirmPassword'].forEach((id) => {
-    $(id)?.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter') return;
-      event.preventDefault();
-      if (id.startsWith('login')) $('loginBtn').click();
-      else $('registerBtn').click();
-    });
-  });
-}
-
-function setupAuthTabs() {
-  document.querySelectorAll('[data-auth-tab]').forEach((button) => {
-    button.addEventListener('click', () => switchAuthTab(button.dataset.authTab));
-  });
+  // Local mode tokens have no refresh — pass null so we don't try to refresh.
+  persistAuth(data.user, data.token, Date.now() + (8 * 60 * 60 * 1000), null);
+  showMessage('Signed in.', 'success');
+  await Promise.all([loadCart(), loadOrders(), loadProducts()]);
 }
 
 function setupEventListeners() {
-  $('registerBtn').addEventListener('click', async () => {
-    const button = $('registerBtn');
-    try {
-      validateRegisterForm();
-      setButtonLoading(button, true, 'Creating account...');
-      const data = await api('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: $('registerName').value.trim(),
-          email: $('registerEmail').value.trim(),
-          password: $('registerPassword').value
-        })
-      });
-      persistAuth(data.user, data.token);
-      showMessage('Account created. You can now add products to your cart.', 'success');
-      await Promise.all([loadCart(), loadOrders(), loadProducts()]);
-    } catch (error) {
-      showMessage(error.message, 'error');
-    } finally {
-      setButtonLoading(button, false);
-    }
+  // Cognito mode — single Sign-in button kicks off the OAuth redirect.
+  $('signInBtn')?.addEventListener('click', () => {
+    Cognito.startLogin('customer').catch((error) => showMessage(error.message, 'error'));
   });
 
-  $('loginBtn').addEventListener('click', async () => {
-    const button = $('loginBtn');
-    try {
-      validateLoginForm();
-      setButtonLoading(button, true, 'Signing in...');
-      const data = await api('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email: $('loginEmail').value.trim(), password: $('loginPassword').value })
-      });
-      persistAuth(data.user, data.token);
-      showMessage('Signed in. You can now shop and checkout.', 'success');
-      await Promise.all([loadCart(), loadOrders(), loadProducts()]);
-    } catch (error) {
-      showMessage(error.message, 'error');
-    } finally {
-      setButtonLoading(button, false);
-    }
+  // Local dev mode — direct POST to /login or /register.
+  $('localSignInBtn')?.addEventListener('click', () => {
+    localAuthRequest('login').catch((error) => showMessage(error.message, 'error'));
+  });
+  $('localRegisterBtn')?.addEventListener('click', () => {
+    localAuthRequest('register').catch((error) => showMessage(error.message, 'error'));
   });
 
-  $('logoutBtn').addEventListener('click', () => {
-    state.user = null;
-    state.token = null;
-    localStorage.removeItem('shopcloud_user');
-    localStorage.removeItem('shopcloud_token');
-    renderUser();
-    switchAuthTab('loginPanel');
-    loadCart();
-    loadOrders();
-    loadProducts();
-    showMessage('Signed out.', 'notice');
+  $('logoutBtn')?.addEventListener('click', async () => {
+    const wasLocalMode = (await Cognito.getMode().catch(() => 'cognito')) === 'local';
+    clearAuth();
+    if (wasLocalMode) {
+      showMessage('Signed out.', 'notice');
+      await Promise.all([loadCart(), loadOrders(), loadProducts()]);
+    } else {
+      Cognito.logout('customer', '/');
+    }
   });
 
   $('clearCartBtn').addEventListener('click', async () => {
@@ -546,13 +470,30 @@ function setupEventListeners() {
   $('viewCartBtn')?.addEventListener('click', () => $('cartSection').scrollIntoView({ behavior: 'smooth' }));
 }
 
-setupAuthTabs();
-setupPasswordControls();
-setupAuthHelpers();
 setupEventListeners();
-updatePasswordMeter();
 renderUser();
+
+async function finishCognitoLoginIfReturning() {
+  try {
+    const result = await Cognito.completeLoginIfNeeded('customer');
+    if (!result) return;
+    persistAuth(result.user, result.token, result.expiresAt, result.refreshToken);
+    showMessage('Signed in.', 'success');
+  } catch (error) {
+    showMessage(error.message, 'error');
+  }
+}
+
+async function applyAuthMode() {
+  const mode = await Cognito.getMode().catch(() => 'cognito');
+  if ($('cognitoModePanel')) $('cognitoModePanel').style.display = mode === 'cognito' ? 'block' : 'none';
+  if ($('localModePanel')) $('localModePanel').style.display = mode === 'local' ? 'block' : 'none';
+}
+
 async function initializeStorefront() {
+  await applyAuthMode();
+  await finishCognitoLoginIfReturning();
+
   try {
     await loadCategories();
   } catch (error) {

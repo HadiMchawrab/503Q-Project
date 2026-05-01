@@ -7,12 +7,19 @@ resources:
   - namespace.yaml
   - ../../base
 
-# CI replaces `newTag` with the short Git SHA before applying:
+# CI replaces `newTag` with the short Git SHA before applying. ECR repos have
+# image_tag_mutability=IMMUTABLE (see infra/terraform/modules/storage/main.tf),
+# so `latest` is intentionally NOT used — it would be rejected on the second push.
+# Run before kubectl apply:
 #   kustomize edit set image shopcloud-app=$REG/shopcloud-app:$TAG
+#   kustomize edit set image admin-ui=$REG/admin-ui:$TAG
 images:
   - name: shopcloud-app
     newName: REPLACE_WITH_ECR_URL/shopcloud-app
-    newTag: latest
+    newTag: placeholder-set-by-ci
+  - name: admin-ui
+    newName: REPLACE_WITH_ECR_URL/admin-ui
+    newTag: placeholder-set-by-ci
 
 # Set INVOICE_QUEUE_URL from terraform output. CI runs:
 #   kustomize edit add configmap shopcloud-config --from-literal=INVOICE_QUEUE_URL=$URL

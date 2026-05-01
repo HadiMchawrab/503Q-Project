@@ -1,5 +1,6 @@
 const state = {
-  token: localStorage.getItem('shopcloud_admin_token')
+  token: localStorage.getItem('shopcloud_admin_token'),
+  refreshToken: localStorage.getItem('shopcloud_admin_refresh'),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -22,8 +23,8 @@ function showMessage(text, type = 'notice') {
   box.textContent = text;
 }
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
+async function rawFetch(path, options) {
+  return fetch(path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -31,13 +32,43 @@ async function api(path, options = {}) {
       ...(options.headers || {})
     }
   });
+}
+
+let refreshInFlight = null;
+
+async function tryRefresh() {
+  if (!state.refreshToken) return false;
+  if (!refreshInFlight) {
+    refreshInFlight = Cognito.refresh('admin', state.refreshToken)
+      .then((result) => {
+        state.token = result.token;
+        state.refreshToken = result.refreshToken;
+        localStorage.setItem('shopcloud_admin_token', result.token);
+        if (result.refreshToken) localStorage.setItem('shopcloud_admin_refresh', result.refreshToken);
+        return true;
+      })
+      .catch(() => {
+        state.token = null;
+        state.refreshToken = null;
+        localStorage.removeItem('shopcloud_admin_token');
+        localStorage.removeItem('shopcloud_admin_refresh');
+        setUnlocked(false);
+        return false;
+      })
+      .finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
+async function api(path, options = {}) {
+  let response = await rawFetch(path, options);
+  if (response.status === 401 && state.refreshToken) {
+    const refreshed = await tryRefresh();
+    if (refreshed) response = await rawFetch(path, options);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error?.message || 'Request failed');
   return data;
-}
-
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
 function setButtonLoading(button, isLoading, loadingText = 'Processing...') {
@@ -63,34 +94,57 @@ function setUnlocked(isUnlocked) {
   if ($('refreshAdminBtn')) $('refreshAdminBtn').style.display = isUnlocked ? 'inline-flex' : 'none';
 }
 
-async function login() {
-  if (!isValidEmail($('adminEmail').value)) throw new Error('Please enter a valid admin email.');
-  if (!$('adminPassword').value) throw new Error('Please enter the admin password.');
+function startLogin() {
+  Cognito.startLogin('admin').catch((error) => showMessage(error.message, 'error'));
+}
 
-  const button = $('adminLoginBtn');
-  setButtonLoading(button, true, 'Signing in...');
+async function localAdminLogin() {
+  const email = $('localAdminEmail').value.trim();
+  const password = $('localAdminPassword').value;
+  if (!email || !password) throw new Error('Email and password required.');
+  const data = await api('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  if (data.user.role !== 'admin') throw new Error('This account is not an admin account.');
+  state.token = data.token;
+  state.refreshToken = null;
+  localStorage.setItem('shopcloud_admin_token', data.token);
+  localStorage.removeItem('shopcloud_admin_refresh');
+  showMessage('Admin login successful.', 'success');
+  await loadAdmin();
+}
+
+async function applyAuthMode() {
+  const mode = await Cognito.getMode().catch(() => 'cognito');
+  if ($('cognitoModePanel')) $('cognitoModePanel').style.display = mode === 'cognito' ? 'block' : 'none';
+  if ($('localModePanel')) $('localModePanel').style.display = mode === 'local' ? 'block' : 'none';
+}
+
+async function finishLoginIfReturning() {
   try {
-    const data = await api('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: $('adminEmail').value.trim(), password: $('adminPassword').value })
-    });
-
-    if (data.user.role !== 'admin') throw new Error('This account is not an admin account.');
-
-    state.token = data.token;
-    localStorage.setItem('shopcloud_admin_token', data.token);
+    const result = await Cognito.completeLoginIfNeeded('admin');
+    if (!result) return false;
+    state.token = result.token;
+    state.refreshToken = result.refreshToken;
+    localStorage.setItem('shopcloud_admin_token', result.token);
+    if (result.refreshToken) localStorage.setItem('shopcloud_admin_refresh', result.refreshToken);
     showMessage('Admin login successful.', 'success');
     await loadAdmin();
-  } finally {
-    setButtonLoading(button, false);
+    return true;
+  } catch (error) {
+    showMessage(error.message, 'error');
+    return false;
   }
 }
 
 function logout() {
   state.token = null;
+  state.refreshToken = null;
   localStorage.removeItem('shopcloud_admin_token');
+  localStorage.removeItem('shopcloud_admin_refresh');
   setUnlocked(false);
-  showMessage('Signed out.', 'notice');
+  Cognito.logout('admin', '/');
 }
 
 async function loadAdmin() {
@@ -318,35 +372,9 @@ function fillSampleProduct() {
   showMessage('Sample product filled. Click Add item to create it.', 'notice');
 }
 
-function setupAdminAuthPolish() {
-  document.querySelectorAll('[data-toggle-password]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const input = $(button.dataset.togglePassword);
-      if (!input) return;
-      const isPassword = input.type === 'password';
-      input.type = isPassword ? 'text' : 'password';
-      button.textContent = isPassword ? 'Hide' : 'Show';
-    });
-  });
-
-  $('fillAdminBtn')?.addEventListener('click', () => {
-    $('adminEmail').value = 'admin@shopcloud.local';
-    $('adminPassword').value = 'Admin123!';
-    showMessage('Demo admin credentials loaded. Click Sign in.', 'notice');
-  });
-
-  ['adminEmail', 'adminPassword'].forEach((id) => {
-    $(id)?.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        $('adminLoginBtn').click();
-      }
-    });
-  });
-}
-
 function setupEvents() {
-  $('adminLoginBtn').addEventListener('click', () => login().catch((error) => showMessage(error.message, 'error')));
+  $('adminLoginBtn')?.addEventListener('click', startLogin);
+  $('localAdminLoginBtn')?.addEventListener('click', () => localAdminLogin().catch((error) => showMessage(error.message, 'error')));
   $('adminLogoutBtn').addEventListener('click', logout);
   $('refreshAdminBtn').addEventListener('click', () => loadAdmin().catch((error) => showMessage(error.message, 'error')));
   $('reloadProductsBtn').addEventListener('click', () => loadProducts().catch((error) => showMessage(error.message, 'error')));
@@ -384,13 +412,19 @@ function setupEvents() {
 }
 
 setUnlocked(false);
-setupAdminAuthPolish();
 setupEvents();
 
-if (state.token) {
-  loadAdmin().catch(() => {
-    localStorage.removeItem('shopcloud_admin_token');
-    state.token = null;
-    setUnlocked(false);
-  });
-}
+(async () => {
+  await applyAuthMode();
+  const handled = await finishLoginIfReturning();
+  if (handled) return;
+  if (state.token) {
+    loadAdmin().catch(() => {
+      localStorage.removeItem('shopcloud_admin_token');
+      localStorage.removeItem('shopcloud_admin_refresh');
+      state.token = null;
+      state.refreshToken = null;
+      setUnlocked(false);
+    });
+  }
+})();

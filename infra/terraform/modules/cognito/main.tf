@@ -30,11 +30,17 @@ resource "aws_cognito_user_pool_client" "customers" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls                        = var.customer_callback_urls
+  logout_urls                          = var.customer_logout_urls
   supported_identity_providers         = ["COGNITO"]
   explicit_auth_flows = [
     "ALLOW_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
+}
+
+resource "aws_cognito_user_pool_domain" "customers" {
+  domain       = var.customer_domain_prefix
+  user_pool_id = aws_cognito_user_pool.customers.id
 }
 
 resource "aws_cognito_user_pool" "admins" {
@@ -66,9 +72,15 @@ resource "aws_cognito_user_pool_client" "admins" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls                        = var.admin_callback_urls
+  logout_urls                          = var.admin_logout_urls
   supported_identity_providers         = ["COGNITO"]
   explicit_auth_flows = [
     "ALLOW_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
+}
+
+resource "aws_cognito_user_pool_domain" "admins" {
+  domain       = var.admin_domain_prefix
+  user_pool_id = aws_cognito_user_pool.admins.id
 }

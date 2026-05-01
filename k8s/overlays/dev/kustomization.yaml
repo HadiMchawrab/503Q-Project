@@ -7,12 +7,17 @@ resources:
   - namespace.yaml
   - ../../base
 
-# CI replaces `newTag` with the short Git SHA before applying:
+# CI replaces `newTag` with the short Git SHA before applying.
+# ECR is IMMUTABLE — `latest` is rejected on the second push, so always use a SHA.
 #   kustomize edit set image shopcloud-app=$REG/shopcloud-app:$TAG
+#   kustomize edit set image admin-ui=$REG/admin-ui:$TAG
 images:
   - name: shopcloud-app
     newName: REPLACE_WITH_ECR_URL/shopcloud-app
-    newTag: latest
+    newTag: placeholder-set-by-ci
+  - name: admin-ui
+    newName: REPLACE_WITH_ECR_URL/admin-ui
+    newTag: placeholder-set-by-ci
 
 # Dev does NOT process invoices — leaving INVOICE_QUEUE_URL empty makes
 # checkout's publish_invoice_event a no-op (see shared/queue.py).

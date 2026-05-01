@@ -1,12 +1,17 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- users.id is the Cognito `sub` claim — the source of truth for identity is Cognito,
--- this table is the local profile/app-data row keyed by that sub. Created just-in-time
--- on the first authenticated request (see shared/auth.py: upsert_user_from_claims).
+-- In Cognito mode, users.id is the Cognito `sub` claim and Cognito owns identity;
+-- this table is just the profile/app-data row keyed by sub.
+-- In local-dev mode (services/auth/main.py /register + /login), the id is generated
+-- here and password_hash + role are populated locally.
+-- The two modes coexist: password_hash and role are nullable, so a Cognito user just
+-- has them as NULL while a local user has both set.
 CREATE TABLE IF NOT EXISTS users (
-  id UUID PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
+  password_hash TEXT,
+  role TEXT CHECK (role IN ('customer', 'admin')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

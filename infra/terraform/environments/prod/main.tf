@@ -94,13 +94,19 @@ module "data" {
 
 
 # ----------------------------------------------------------------------------
-# Storage — ECR repositories, one per service.
+# Storage — ECR repositories.
+# Two images:
+#   - shopcloud-app: the one Python image used by every backend Deployment.
+#                    Each Deployment overrides the uvicorn entrypoint to pick
+#                    a service (services.<name>.main:app).
+#   - admin-ui:      static NGINX image for the admin console (separate because
+#                    it ships HTML/JS, not the Python app).
 # CI pushes Docker images here; EKS pulls from here.
 # ----------------------------------------------------------------------------
 module "storage" {
   source = "../../modules/storage"
 
-  services = ["catalog", "cart", "checkout", "auth", "admin", "admin-ui"]
+  services = ["shopcloud-app", "admin-ui"]
 }
 
 

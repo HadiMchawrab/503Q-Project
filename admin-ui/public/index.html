@@ -48,17 +48,22 @@
         </div>
 
         <div class="login-panel">
-          <h3>Admin sign in</h3>
-          <p class="muted">Use the seeded admin account for the demo.</p>
+          <div id="cognitoModePanel" style="display:none;">
+            <h3>Admin sign in</h3>
+            <p class="muted">Sign in with your ShopCloud admin account. MFA is enforced — make sure you have your authenticator app available.</p>
+            <button id="adminLoginBtn" class="btn btn-primary full-width" type="button">Sign in with ShopCloud</button>
+            <p class="muted small">You will be redirected to the secure ShopCloud admin sign-in page.</p>
+          </div>
 
-          <label class="field-label" for="adminEmail">Email</label>
-          <div class="input-shell"><span>@</span><input id="adminEmail" type="email" placeholder="admin@shopcloud.local" autocomplete="email" inputmode="email" /></div>
-
-          <label class="field-label" for="adminPassword">Password</label>
-          <div class="input-shell password-shell"><span>••</span><input id="adminPassword" type="password" placeholder="Password" autocomplete="current-password" /><button data-toggle-password="adminPassword" type="button">Show</button></div>
-
-          <button id="adminLoginBtn" class="btn btn-primary full-width" type="button">Sign in</button>
-          <button id="fillAdminBtn" class="btn-text" type="button">Fill demo admin credentials</button>
+          <div id="localModePanel" style="display:none;">
+            <h3>Local dev sign-in</h3>
+            <p class="muted">Cognito isn't configured — using local HS256 tokens. <em>This UI does not appear in production.</em></p>
+            <label class="field-label" for="localAdminEmail">Email</label>
+            <div class="input-shell"><span>@</span><input id="localAdminEmail" type="email" placeholder="admin@shopcloud.local" autocomplete="email" /></div>
+            <label class="field-label" for="localAdminPassword">Password</label>
+            <div class="input-shell"><span>••</span><input id="localAdminPassword" type="password" placeholder="Password" autocomplete="current-password" /></div>
+            <button id="localAdminLoginBtn" class="btn btn-primary full-width" type="button">Sign in</button>
+          </div>
         </div>
       </section>
 
@@ -155,6 +160,7 @@
     </main>
   </div>
 
+  <script src="/cognito.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>

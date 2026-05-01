@@ -88,9 +88,9 @@ terraform apply
 
 App changes go through CI — push to `main`, GitHub Actions builds and pushes images to ECR, then applies the relevant Kustomize overlay under [k8s/overlays/](k8s/overlays/) against the cluster.
 
-Each backend service has its own image tag in ECR, even though several services share the same Dockerfile pattern. That keeps rollouts and scaling isolated per service.
+All five backend services share a single image (`shopcloud-app` in ECR). Each Deployment picks its service by overriding the uvicorn entrypoint (e.g. `services.auth.main:app` in [k8s/base/auth.yaml](k8s/base/auth.yaml)). Rollouts are atomic — one image tag promotes every backend service together.
 
-The customer storefront and the admin console are split into separate frontend images and endpoints. In AWS, the admin console lives behind an internal ALB reachable only through VPN ([infra/terraform/modules/vpn/](infra/terraform/modules/vpn/)).
+The customer storefront and the admin console ship as separate images (`web` is part of `shopcloud-app`; `admin-ui` is its own NGINX image). The admin console lives behind an internal ALB reachable only through VPN ([infra/terraform/modules/vpn/](infra/terraform/modules/vpn/)).
 
 ## Configuration
 

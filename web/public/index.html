@@ -92,57 +92,26 @@
         </aside>
 
         <div class="auth-card" id="authCard">
-          <div class="auth-tabs" role="tablist" aria-label="Authentication forms">
-            <button class="active" data-auth-tab="loginPanel" type="button">Sign in</button>
-            <button data-auth-tab="registerPanel" type="button">Register</button>
+          <!-- Cognito mode (default) -->
+          <div id="cognitoModePanel" style="display:none;">
+            <h3>Sign in to ShopCloud</h3>
+            <p class="muted">We use a hosted sign-in page so your password and MFA setup are never handled by this site. New here? The same button creates an account.</p>
+            <button id="signInBtn" class="btn btn-primary full-width" type="button">Sign in or create account</button>
+            <p class="muted small">You'll be redirected to the secure ShopCloud sign-in page and brought back here when you're done.</p>
           </div>
 
-          <div id="loginPanel" class="auth-panel active">
-            <h3>Welcome back</h3>
-            <p class="muted">Use your customer account to continue shopping.</p>
-            <label class="field-label" for="loginEmail">Email</label>
-            <div class="input-shell"><span>@</span><input id="loginEmail" type="email" placeholder="customer@email.com" autocomplete="email" inputmode="email" /></div>
-            <label class="field-label" for="loginPassword">Password</label>
-            <div class="input-shell password-shell"><span>••</span><input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" /><button data-toggle-password="loginPassword" type="button">Show</button></div>
-            <button id="loginBtn" class="btn btn-primary full-width" type="button">Sign in</button>
-            <button id="quickCustomerBtn" class="btn-text" type="button">Use demo customer</button>
-          </div>
-
-          <div id="signedInPanel" class="auth-panel">
-            <h3>Account active</h3>
-            <p class="muted">You are signed in. Continue shopping, review your cart, or place an order when ready.</p>
-            <a class="btn btn-primary full-width" href="#storefront">Continue shopping</a>
-          </div>
-
-          <div id="registerPanel" class="auth-panel">
-            <h3>Create your account</h3>
-            <p class="muted">Create a customer account for cart, checkout, and order tracking.</p>
-            <div class="form-grid two-col">
-              <div>
-                <label class="field-label" for="registerName">Full name</label>
-                <div class="input-shell"><span>ID</span><input id="registerName" placeholder="Mansour Allam" autocomplete="name" /></div>
-              </div>
-              <div>
-                <label class="field-label" for="registerEmail">Email</label>
-                <div class="input-shell"><span>@</span><input id="registerEmail" type="email" placeholder="customer@email.com" autocomplete="email" inputmode="email" /></div>
-              </div>
-              <div>
-                <label class="field-label" for="registerPassword">Password</label>
-                <div class="input-shell password-shell"><span>••</span><input id="registerPassword" type="password" placeholder="Minimum 8 characters" autocomplete="new-password" /><button data-toggle-password="registerPassword" type="button">Show</button></div>
-                <div class="password-meter"><span id="passwordStrengthBar"></span></div>
-              </div>
-              <div>
-                <label class="field-label" for="registerConfirmPassword">Confirm password</label>
-                <div class="input-shell password-shell"><span>✓</span><input id="registerConfirmPassword" type="password" placeholder="Repeat password" autocomplete="new-password" /><button data-toggle-password="registerConfirmPassword" type="button">Show</button></div>
-              </div>
+          <!-- Local dev mode (APP_ENV != production AND no Cognito configured) -->
+          <div id="localModePanel" style="display:none;">
+            <h3>Local dev sign-in</h3>
+            <p class="muted">Cognito isn't configured — using local HS256 tokens. <em>This UI does not appear in production.</em></p>
+            <label class="field-label" for="localEmail">Email</label>
+            <div class="input-shell"><span>@</span><input id="localEmail" type="email" placeholder="customer@email.com" autocomplete="email" /></div>
+            <label class="field-label" for="localPassword">Password</label>
+            <div class="input-shell"><span>••</span><input id="localPassword" type="password" placeholder="Password" autocomplete="current-password" /></div>
+            <div class="action-row">
+              <button id="localSignInBtn" class="btn btn-primary" type="button">Sign in</button>
+              <button id="localRegisterBtn" class="btn btn-secondary" type="button">Create account</button>
             </div>
-            <div class="password-checklist" id="passwordChecklist">
-              <span data-rule="length">8+ characters</span>
-              <span data-rule="letter">Letter</span>
-              <span data-rule="number">Number</span>
-            </div>
-            <label class="check-row terms-row"><input id="acceptTerms" type="checkbox" /> <span>I agree to create a demo customer account for this local project.</span></label>
-            <button id="registerBtn" class="btn btn-primary full-width" type="button">Create account</button>
           </div>
 
           <div id="message" class="notice">Ready.</div>
@@ -217,6 +186,7 @@
     </section>
   </main>
 
+  <script src="/cognito.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

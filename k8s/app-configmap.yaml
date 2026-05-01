@@ -12,3 +12,11 @@ data:
   AWS_REGION: "eu-west-1"
   # INVOICE_QUEUE_URL is set per-environment via the kustomize overlay
   # (terraform output -raw invoice_queue_url).
+  # Cognito values come from terraform outputs and are merged in by the overlay.
+  # Empty here so the base manifest is environment-agnostic; overlay overrides.
+  COGNITO_USER_POOL_ID: ""
+  COGNITO_ADMIN_POOL_ID: ""
+  COGNITO_CLIENT_ID: ""
+  COGNITO_ADMIN_CLIENT_ID: ""
+  COGNITO_CUSTOMER_DOMAIN: ""
+  COGNITO_ADMIN_DOMAIN: ""

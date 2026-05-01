@@ -1,0 +1,225 @@
+name: Deploy app
+
+# Branch → environment mapping is the source of truth for this repo:
+#   dev branch  → dev namespace  in EKS
+#   main branch → prod namespace in EKS
+# Pushes to any other branch are ignored. PRs run build-only as a smoke test.
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (overrides branch mapping)"
+        required: true
+        type: choice
+        options: [dev, prod]
+
+# Serialize deploys per environment so two pushes don't race kubectl apply.
+# group key uses the resolved environment, set by the deploy job.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}      # e.g. 123456789012.dkr.ecr.eu-west-1.amazonaws.com
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+  # ROLE_TO_ASSUME_DEV / ROLE_TO_ASSUME_PROD are referenced per-job below.
+
+permissions:
+  id-token: write   # Required for AWS OIDC role assumption
+  contents: read
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # Resolve which environment this run targets BEFORE any expensive work.
+  # Branch push wins unless workflow_dispatch overrides via input.
+  # ----------------------------------------------------------------------------
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      namespace: ${{ steps.pick.outputs.namespace }}
+      should_deploy: ${{ steps.pick.outputs.should_deploy }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ inputs.environment }}"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ENV="prod"
+          elif [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            ENV="dev"
+          else
+            # PR builds — build the images to validate but don't deploy.
+            ENV="dev"
+          fi
+
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "namespace=$ENV" >> "$GITHUB_OUTPUT"
+
+          # Only push events to dev/main (or manual dispatch) actually deploy.
+          # PRs build images for validation but never apply.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ----------------------------------------------------------------------------
+  # Build + push both images. Tag with the short Git SHA — ECR is IMMUTABLE
+  # so the same SHA can never be overwritten.
+  # ----------------------------------------------------------------------------
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "image_tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.resolve.outputs.environment == 'prod' && secrets.ROLE_TO_ASSUME_PROD || secrets.ROLE_TO_ASSUME_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build shopcloud-app image
+        run: |
+          # All five backends share this image — Deployments override the
+          # uvicorn entrypoint to pick a service. We build with the auth
+          # service's Dockerfile because every services/*/Dockerfile produces
+          # the same final image (same shared/, same requirements.txt).
+          docker build \
+            -f services/auth/Dockerfile \
+            -t "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}" \
+            .
+
+      - name: Build admin-ui image
+        run: |
+          docker build \
+            -f admin-ui/Dockerfile \
+            -t "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}" \
+            .
+
+      - name: Push images
+        if: needs.resolve.outputs.should_deploy == 'true'
+        run: |
+          docker push "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}"
+          docker push "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}"
+
+  # ----------------------------------------------------------------------------
+  # Apply the right kustomize overlay against EKS.
+  # PRs skip this entirely; only push-to-dev / push-to-main deploy.
+  # ----------------------------------------------------------------------------
+  deploy:
+    needs: [resolve, build]
+    if: needs.resolve.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    # GitHub Environments add: required reviewers (for prod), env-scoped secrets,
+    # and a deployment record on each run. Configure these in repo settings.
+    environment: ${{ needs.resolve.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.resolve.outputs.environment == 'prod' && secrets.ROLE_TO_ASSUME_PROD || secrets.ROLE_TO_ASSUME_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name "$EKS_CLUSTER_NAME" --region "$AWS_REGION"
+
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: "5.4.3"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.5"
+
+      - name: Read terraform outputs
+        # The values that change per environment (queue URL, Cognito IDs, IRSA
+        # role ARN) are owned by terraform. Read them straight from the state
+        # via `terraform output` — no extra layer to keep in sync.
+        # Requires the runner's IAM role to have read access to the terraform
+        # state backend (S3 bucket + DynamoDB lock table).
+        id: tf_out
+        working-directory: infra/terraform/environments/${{ needs.resolve.outputs.environment == 'prod' && 'prod' || 'prod' }}
+        # NOTE: dev currently shares the prod terraform environment. When a
+        # dedicated infra/terraform/environments/dev is added, switch the
+        # working-directory expression above to use the resolved environment.
+        run: |
+          set -euo pipefail
+          terraform init -input=false -backend=true >/dev/null
+
+          out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
+          {
+            echo "INVOICE_QUEUE_URL=$(out invoice_queue_url)"
+            echo "COGNITO_USER_POOL_ID=$(out cognito_customer_pool_id)"
+            echo "COGNITO_ADMIN_POOL_ID=$(out cognito_admin_pool_id)"
+            echo "COGNITO_CLIENT_ID=$(out cognito_customer_client_id)"
+            echo "COGNITO_ADMIN_CLIENT_ID=$(out cognito_admin_client_id)"
+            echo "COGNITO_CUSTOMER_DOMAIN=$(out cognito_customer_hosted_ui_domain)"
+            echo "COGNITO_ADMIN_DOMAIN=$(out cognito_admin_hosted_ui_domain)"
+            echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Configure overlay
+        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.image_tag }}"
+
+          # 1) Pin both images to the SHA we just pushed.
+          kustomize edit set image "shopcloud-app=$ECR_REGISTRY/shopcloud-app:$TAG"
+          kustomize edit set image "admin-ui=$ECR_REGISTRY/admin-ui:$TAG"
+
+          # 2) Merge real config values from terraform outputs into the
+          #    shopcloud-config ConfigMap (the base has empty placeholders).
+          kustomize edit add configmap shopcloud-config \
+            --behavior=merge \
+            --from-literal=INVOICE_QUEUE_URL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}' \
+            --from-literal=COGNITO_USER_POOL_ID='${{ steps.tf_out.outputs.COGNITO_USER_POOL_ID }}' \
+            --from-literal=COGNITO_ADMIN_POOL_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_POOL_ID }}' \
+            --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
+            --from-literal=COGNITO_ADMIN_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_CLIENT_ID }}' \
+            --from-literal=COGNITO_CUSTOMER_DOMAIN='${{ steps.tf_out.outputs.COGNITO_CUSTOMER_DOMAIN }}' \
+            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}'
+
+          # 3) Patch the IRSA role ARN onto the checkout ServiceAccount.
+          #    The overlay already references checkout-sa-patch.yaml; we just
+          #    rewrite the placeholder ARN inline so it never gets committed.
+          sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-checkout|${{ steps.tf_out.outputs.CHECKOUT_IRSA_ROLE_ARN }}|g" \
+            checkout-sa-patch.yaml
+
+      - name: Diff (informational)
+        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        run: |
+          # `kubectl diff` exits 1 when there ARE differences — that's expected
+          # for a deploy, so don't fail the step on that.
+          kustomize build . | kubectl diff -f - || true
+
+      - name: Apply
+        working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
+        run: kustomize build . | kubectl apply -f -
+
+      - name: Wait for rollout
+        run: |
+          NS="${{ needs.resolve.outputs.namespace }}"
+          for d in auth catalog cart checkout admin admin-ui web; do
+            kubectl -n "$NS" rollout status deployment/$d --timeout=5m
+          done

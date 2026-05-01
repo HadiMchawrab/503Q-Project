@@ -62,6 +62,18 @@ output "cognito_customer_client_id" {
   value = module.cognito.customer_pool_client_id
 }
 
+output "cognito_admin_client_id" {
+  value = module.cognito.admin_pool_client_id
+}
+
+output "cognito_customer_hosted_ui_domain" {
+  value = module.cognito.customer_hosted_ui_domain
+}
+
+output "cognito_admin_hosted_ui_domain" {
+  value = module.cognito.admin_hosted_ui_domain
+}
+
 # Edge
 output "cloudfront_domain_name" {
   description = "CNAME this from your DNS provider if hosted_zone_id is empty."

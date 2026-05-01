@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-ui
+  labels: { app: admin-ui }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: admin-ui }
+  template:
+    metadata:
+      labels: { app: admin-ui }
+    spec:
+      containers:
+        - name: admin-ui
+          # Separate image — NGINX serving the admin console static assets.
+          # Built from admin-ui/Dockerfile.
+          image: admin-ui:latest
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-ui
+spec:
+  selector: { app: admin-ui }
+  ports:
+    - port: 80
+      targetPort: 80

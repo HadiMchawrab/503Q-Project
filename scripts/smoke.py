@@ -1,11 +1,12 @@
-# NOTE: This smoke test is BROKEN after the Cognito migration. /api/auth/register
-# and /api/auth/login no longer exist — auth now happens through Cognito and the
-# frontend obtains a token from the Cognito Hosted UI / OAuth code flow. To fix:
-# acquire a Cognito-issued JWT for a test user (admin-create-user + admin-initiate-auth)
-# and pass it as the Bearer token. Skipping the rewrite for now.
+"""End-to-end smoke test for the local docker-compose stack.
+
+Only valid in local dev mode (APP_ENV != production and no Cognito configured) —
+exercises the HS256 /login + /register path. Refuses to run otherwise.
+"""
 from __future__ import annotations
 
 import json
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -34,6 +35,11 @@ def main() -> int:
             time.sleep(1)
     else:
         print("Gateway/catalog did not become ready.")
+        return 1
+
+    config = request("/api/auth/config")
+    if config.get("mode") != "local":
+        print(f"Smoke test only runs in local mode (got mode={config.get('mode')}).")
         return 1
 
     products = request("/api/catalog/products")
@@ -76,4 +82,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

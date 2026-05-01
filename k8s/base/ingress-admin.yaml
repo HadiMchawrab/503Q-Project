@@ -16,9 +16,27 @@ spec:
   rules:
     - http:
         paths:
+          # Admin REST API
           - path: /api/admin
             pathType: Prefix
             backend:
               service:
                 name: admin
                 port: { number: 3005 }
+          # Auth endpoints used by the admin console (/config, /me, and in
+          # local-dev mode /login). The customer-facing public ALB has its own
+          # copy of this route — they reach the same auth Service.
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth
+                port: { number: 3004 }
+          # Admin console static assets (index.html, admin.js, cognito.js, css).
+          # Must be last so it acts as the catch-all.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: admin-ui
+                port: { number: 80 }
