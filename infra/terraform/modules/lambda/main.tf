@@ -185,5 +185,5 @@ resource "aws_security_group_rule" "lambda_to_rds" {
   protocol                 = "tcp"
   security_group_id        = var.rds_security_group_id
   source_security_group_id = aws_security_group.lambda.id
-  description              = "invoice-generator Lambda → RDS Postgres"
+  description              = "invoice-generator Lambda to RDS Postgres"
 }

@@ -52,7 +52,7 @@ resource "aws_security_group" "rds" {
 resource "aws_db_instance" "this" {
   identifier     = "${var.name}-postgres"
   engine         = "postgres"
-  engine_version = "16.3"
+  engine_version = "16.13"
   instance_class = "db.t3.micro" # smallest available; bump for real load
 
   allocated_storage     = 20
@@ -63,12 +63,14 @@ resource "aws_db_instance" "this" {
   username = var.db_username
   password = var.db_password
 
-  multi_az               = true # synchronous standby in another AZ for HA
+  # Free-tier-eligible accounts cannot use Multi-AZ or backup_retention > 0.
+  # For real prod, set multi_az = true and backup_retention_period >= 7.
+  multi_az               = false
   db_subnet_group_name   = aws_db_subnet_group.this.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  backup_retention_period = 7 # daily snapshots kept for 7 days
+  backup_retention_period = 0    # 0 = no automated backups (required by free tier)
   skip_final_snapshot     = true # set to false in real prod
 
   tags = { Name = "${var.name}-postgres" }

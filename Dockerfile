@@ -13,7 +13,7 @@ RUN apt-get update \
     && adduser --system --ingroup shopcloud shopcloud
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --default-timeout=1000 -r requirements.txt
 
 # All five backend services ship in the same image. Each k8s Deployment picks
 # its service via `command: ["uvicorn", "services.<name>.main:app", ...]`

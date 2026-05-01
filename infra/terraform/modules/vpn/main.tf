@@ -38,7 +38,7 @@ resource "aws_cloudwatch_log_stream" "vpn" {
 
 resource "aws_security_group" "vpn" {
   name        = "${var.name}-clientvpn"
-  description = "Client VPN endpoint — egress to VPC only"
+  description = "Client VPN endpoint -- egress to VPC only"
   vpc_id      = var.vpc_id
 
   egress {

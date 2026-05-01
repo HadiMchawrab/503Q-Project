@@ -25,7 +25,7 @@ resource "aws_sqs_queue" "invoice" {
 # to process. Without this, failures are silent.
 resource "aws_cloudwatch_metric_alarm" "dlq_not_empty" {
   alarm_name          = "${var.name}-invoice-dlq-not-empty"
-  alarm_description   = "Messages have ended up in the invoice DLQ — investigate."
+  alarm_description   = "Messages have ended up in the invoice DLQ -- investigate."
   namespace           = "AWS/SQS"
   metric_name         = "ApproximateNumberOfMessagesVisible"
   statistic           = "Maximum"

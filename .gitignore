@@ -5,3 +5,16 @@ __pycache__/
 .venv/
 venv/
 node_modules/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+# Real var files contain secrets (db_password, etc.). Examples are committed.
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
