@@ -24,7 +24,6 @@ export function CartProvider({ children }) {
     try {
       await api.addToCart(productId, 1)
       await fetchCart()
-      setIsOpen(true)
     } catch (e) {
       setError(e.message)
     } finally {

@@ -2,7 +2,7 @@
    Palette
    #800020  burgundy header
    #5C0018  cart drawer / deep accent
-   #8B1A2E  active states, borders
+   #6F1530  active states, borders
    #F5E6EA  hover tints
    #D4AF37  gold primary
    #C9A84C  gold mid / hover
@@ -73,7 +73,6 @@ img { display: block; max-width: 100%; }
 /* Search */
 .hdr-search {
   flex: 1;
-  max-width: 860px;
   display: flex;
   height: 40px;
   border-radius: 4px;
@@ -167,7 +166,7 @@ img { display: block; max-width: 100%; }
   transition: background 0.1s;
   cursor: pointer;
 }
-.hdr-dropdown-item:hover { background: #F5E6EA; color: #8B1A2E; }
+.hdr-dropdown-item:hover { background: #F5E6EA; color: #6F1530; }
 .hdr-dropdown-item--danger { color: #B12704; }
 .hdr-dropdown-item--danger:hover { background: #FFF4F4; color: #B12704; }
 .hdr-dropdown-divider { border: none; border-top: 1px solid #E7E7E7; margin: 6px 0; }
@@ -188,7 +187,7 @@ img { display: block; max-width: 100%; }
 .hdr-dropdown-signin:hover { background: #C9A84C; }
 .hdr-dropdown-hint { padding: 2px 16px 6px; font-size: 12px; color: #555; }
 .hdr-dropdown-hint a { color: #A0702A; cursor: pointer; }
-.hdr-dropdown-hint a:hover { text-decoration: underline; color: #8B1A2E; }
+.hdr-dropdown-hint a:hover { text-decoration: underline; color: #6F1530; }
 
 /* Cart button */
 .hdr-cart-btn { flex-direction: row; align-items: center; gap: 6px; }
@@ -229,6 +228,8 @@ img { display: block; max-width: 100%; }
   padding: 18px;
   position: sticky;
   top: 76px;
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 .sf-sidebar-title { font-size: 18px; font-weight: 700; padding-bottom: 14px; border-bottom: 1px solid #E7E7E7; margin-bottom: 14px; }
@@ -243,10 +244,10 @@ img { display: block; max-width: 100%; }
   font-size: 13px;
   cursor: pointer;
 }
-.sf-radio input { accent-color: #8B1A2E; cursor: pointer; }
+.sf-radio input { accent-color: #6F1530; cursor: pointer; }
 .sf-cat-count { color: #888; font-size: 12px; margin-left: 2px; }
 .sf-checkbox { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
-.sf-checkbox input { accent-color: #8B1A2E; cursor: pointer; }
+.sf-checkbox input { accent-color: #6F1530; cursor: pointer; }
 .sf-price-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .sf-price-input {
   width: 72px;
@@ -256,12 +257,12 @@ img { display: block; max-width: 100%; }
   font-size: 12px;
   outline: none;
 }
-.sf-price-input:focus { border-color: #8B1A2E; box-shadow: 0 0 0 2px rgba(139,26,46,0.15); }
+.sf-price-input:focus { border-color: #6F1530; box-shadow: 0 0 0 2px rgba(111,21,48,0.15); }
 
 /* Products area */
 .sf-products { flex: 1; min-width: 0; }
 .sf-results-label { font-size: 18px; margin-bottom: 14px; }
-.sf-results-label strong { color: #8B1A2E; }
+.sf-results-label strong { color: #6F1530; }
 .sf-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -332,7 +333,7 @@ img { display: block; max-width: 100%; }
   border-radius: 4px;
 }
 .product-badge--out { background: rgba(128,0,32,0.72); color: white; }
-.product-badge--low { background: #F5E6EA; color: #8B1A2E; border: 1px solid #D4A8B5; }
+.product-badge--low { background: #F5E6EA; color: #6F1530; border: 1px solid #D4A8B5; }
 
 .product-card-body { padding: 12px; flex: 1; display: flex; flex-direction: column; }
 .product-category { font-size: 11px; color: #A0702A; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; font-weight: 600; }
@@ -480,7 +481,7 @@ img { display: block; max-width: 100%; }
   width: 100%; height: 100%;
   background: #F5E6EA;
   display: flex; align-items: center; justify-content: center;
-  font-size: 20px; font-weight: 700; color: #8B1A2E;
+  font-size: 20px; font-weight: 700; color: #6F1530;
 }
 .cart-item-body { flex: 1; }
 .cart-item-name { font-size: 13px; font-weight: 500; margin-bottom: 4px; line-height: 1.4; }
@@ -498,7 +499,7 @@ img { display: block; max-width: 100%; }
 .qty-btn:hover { background: #E7E9E9; }
 .qty-val { font-size: 14px; font-weight: 600; min-width: 18px; text-align: center; }
 .cart-remove-btn { font-size: 12px; color: #A0702A; margin-left: 4px; }
-.cart-remove-btn:hover { text-decoration: underline; color: #8B1A2E; }
+.cart-remove-btn:hover { text-decoration: underline; color: #6F1530; }
 .cart-item-total { font-size: 14px; font-weight: 700; flex-shrink: 0; }
 
 /* Cart footer */
@@ -551,7 +552,7 @@ img { display: block; max-width: 100%; }
   outline: none;
   line-height: 1.5;
 }
-.checkout-textarea:focus { border-color: #8B1A2E; box-shadow: 0 0 0 2px rgba(139,26,46,0.15); }
+.checkout-textarea:focus { border-color: #6F1530; box-shadow: 0 0 0 2px rgba(111,21,48,0.15); }
 .checkout-summary {
   background: #FAF5F6;
   border: 1px solid #EDE0E3;
@@ -567,7 +568,7 @@ img { display: block; max-width: 100%; }
 .place-order-btn {
   width: 100%;
   padding: 13px;
-  background: #8B1A2E;
+  background: #6F1530;
   color: white;
   border-radius: 24px;
   font-size: 15px;
@@ -633,7 +634,7 @@ img { display: block; max-width: 100%; }
   transition: background 0.1s;
 }
 .acc-nav-item:hover { background: #FAF5F6; }
-.acc-nav-item--active { background: #F5E6EA; color: #8B1A2E; font-weight: 600; }
+.acc-nav-item--active { background: #F5E6EA; color: #6F1530; font-weight: 600; }
 .acc-nav-icon { font-size: 17px; }
 
 /* Content */
@@ -644,7 +645,7 @@ img { display: block; max-width: 100%; }
 .acc-spinner {
   width: 36px; height: 36px;
   border: 3px solid #F0F0F0;
-  border-top-color: #8B1A2E;
+  border-top-color: #6F1530;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin: 60px auto;
@@ -676,7 +677,7 @@ img { display: block; max-width: 100%; }
 }
 .badge--green { background: #E6F4EA; color: #1A7F37; }
 .badge--blue { background: #E8F0FE; color: #1A56DB; }
-.badge--orange { background: #F5E6EA; color: #8B1A2E; }
+.badge--orange { background: #F5E6EA; color: #6F1530; }
 .badge--red { background: #FEECEB; color: #B12704; }
 
 /* Orders */
@@ -747,7 +748,7 @@ img { display: block; max-width: 100%; }
   max-width: 340px;
   outline: none;
 }
-.settings-input:focus { border-color: #8B1A2E; box-shadow: 0 0 0 2px rgba(139,26,46,0.15); }
+.settings-input:focus { border-color: #6F1530; box-shadow: 0 0 0 2px rgba(111,21,48,0.15); }
 .settings-actions { display: flex; gap: 8px; }
 .settings-save-btn {
   padding: 7px 16px;
@@ -763,13 +764,13 @@ img { display: block; max-width: 100%; }
 .settings-cancel-btn { padding: 7px 16px; background: #F0F2F2; border-radius: 20px; font-size: 13px; border: 1px solid #D5D9D9; transition: background 0.1s; }
 .settings-cancel-btn:hover { background: #E7E9E9; }
 .settings-edit-btn { font-size: 13px; color: #A0702A; }
-.settings-edit-btn:hover { text-decoration: underline; color: #8B1A2E; }
+.settings-edit-btn:hover { text-decoration: underline; color: #6F1530; }
 .settings-pw-error { font-size: 13px; color: #B12704; }
 .settings-danger { background: #FAF5F6; border: 1px solid #EDE0E3; border-radius: 8px; padding: 20px; }
 .settings-danger h3 { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
 .settings-danger p { font-size: 13px; color: #555; margin-bottom: 14px; }
 .settings-signout-btn { padding: 8px 22px; background: white; border: 1px solid #D5D9D9; border-radius: 20px; font-size: 13px; transition: background 0.1s, border-color 0.1s; }
-.settings-signout-btn:hover { background: #F0F2F2; border-color: #8B1A2E; }
+.settings-signout-btn:hover { background: #F0F2F2; border-color: #6F1530; }
 
 /* Sign-in form */
 .signin-box {
@@ -793,7 +794,7 @@ img { display: block; max-width: 100%; }
   outline: none;
   transition: border-color 0.1s, box-shadow 0.1s;
 }
-.signin-field input:focus { border-color: #8B1A2E; box-shadow: 0 0 0 2px rgba(139,26,46,0.15); }
+.signin-field input:focus { border-color: #6F1530; box-shadow: 0 0 0 2px rgba(111,21,48,0.15); }
 .signin-error { color: #B12704; font-size: 13px; }
 .signin-submit {
   padding: 10px;
@@ -810,7 +811,7 @@ img { display: block; max-width: 100%; }
 .signin-submit:disabled { opacity: 0.6; cursor: not-allowed; }
 .signin-switch { margin-top: 14px; font-size: 13px; color: #555; text-align: center; }
 .signin-switch button { color: #A0702A; font-size: 13px; text-decoration: underline; }
-.signin-switch button:hover { color: #8B1A2E; }
+.signin-switch button:hover { color: #6F1530; }
 
 /* ═══════════════════════════════════════════
    Responsive

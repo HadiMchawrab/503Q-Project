@@ -33,7 +33,7 @@ export default function Header({ onSearch }) {
     <header className="hdr">
       {/* ── Logo ── */}
       <button className="hdr-logo" onClick={() => navigate('/')}>
-        <img src="/logo.png" alt="503Q" className="hdr-logo-img" />
+        <img src="/logo.svg" alt="503Q" className="hdr-logo-img" />
         <span className="hdr-logo-text">503<span>Q</span></span>
       </button>
 
@@ -57,10 +57,15 @@ export default function Header({ onSearch }) {
       {/* ── Right side ── */}
       <div className="hdr-right">
         {/* Account */}
-        <div className="hdr-account" ref={accountRef}>
+        <div
+          className="hdr-account"
+          ref={accountRef}
+          onMouseEnter={() => setShowAccount(true)}
+          onMouseLeave={() => setShowAccount(false)}
+        >
           <button
             className="hdr-btn"
-            onClick={() => setShowAccount(v => !v)}
+            onClick={() => navigate(user ? '/account/orders' : '/account')}
           >
             <span className="hdr-btn-top">Hello, {firstName}</span>
             <span className="hdr-btn-main">Account &amp; Orders</span>
