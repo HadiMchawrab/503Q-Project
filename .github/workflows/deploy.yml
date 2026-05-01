@@ -125,11 +125,26 @@ jobs:
 
       - name: Push images
         if: needs.resolve.outputs.should_deploy == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.image_tag }}
         run: |
-          docker push "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}"
-          docker push "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}"
+          # ECR repos are IMMUTABLE (modules/storage), so re-pushing the same
+          # SHA tag returns "tag invalid: ... already exists ... immutable".
+          # That is the desired safety, not an error: the image is already
+          # in the registry, which is all the deploy step needs. Skip push
+          # if the tag exists; otherwise push.
+          push_if_new() {
+            local repo="$1"
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "skip: $repo:$TAG already in ECR"
+            else
+              docker push "$ECR_REGISTRY/$repo:$TAG"
+            fi
+          }
+          push_if_new shopcloud-app
+          push_if_new admin-ui
           if [[ "${{ needs.resolve.outputs.environment }}" == "prod" ]]; then
-            docker push "$ECR_REGISTRY/invoice-worker:${{ steps.tag.outputs.image_tag }}"
+            push_if_new invoice-worker
           fi
 
   # ----------------------------------------------------------------------------
