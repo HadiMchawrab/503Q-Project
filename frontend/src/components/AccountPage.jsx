@@ -12,8 +12,29 @@ const TABS = [
   { path: '/account/settings', label: 'Login & Security', icon: '🔒' },
 ]
 
-function SignInForm({ onSignIn }) {
-  const [mode, setMode] = useState('login') // 'login' | 'register'
+// Cognito sign-in: a single button that hands off to the Cognito Hosted UI.
+// Account creation, password reset, and MFA all live there — we don't roll
+// our own form against the user pool. Used in 'cognito' mode only; the local
+// dev mode (docker compose, MODE=local) renders LocalSignInForm instead.
+function CognitoSignInPanel({ onStart, error }) {
+  return (
+    <div className="signin-box">
+      <h2 className="signin-title">Sign in to 503Q</h2>
+      <p className="signin-hint">
+        You'll be taken to our secure sign-in page to enter your email and password.
+      </p>
+      {error && <p className="signin-error">{error}</p>}
+      <button type="button" className="signin-submit" onClick={onStart}>
+        Sign In or Create Account
+      </button>
+    </div>
+  )
+}
+
+// Local-mode form for `docker compose up` development against the
+// auth service's MODE=local fallback. Not used in any deployed environment.
+function LocalSignInForm({ onSignIn }) {
+  const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
@@ -38,7 +59,7 @@ function SignInForm({ onSignIn }) {
 
   return (
     <div className="signin-box">
-      <h2 className="signin-title">{mode === 'login' ? 'Sign In' : 'Create Account'}</h2>
+      <h2 className="signin-title">{mode === 'login' ? 'Sign In (local dev)' : 'Create Account (local dev)'}</h2>
       <form onSubmit={handle} className="signin-form">
         {mode === 'register' && (
           <div className="signin-field">
@@ -91,7 +112,7 @@ function SignInForm({ onSignIn }) {
 }
 
 export default function AccountPage() {
-  const { user, login } = useAuth()
+  const { user, mode, login, startCognitoLogin, error } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -102,10 +123,14 @@ export default function AccountPage() {
   if (!user) {
     return (
       <div className="acc-page acc-page--guest">
-        <SignInForm onSignIn={(userData, token) => {
-          login(userData, token)
-          navigate('/account/orders')
-        }} />
+        {mode === 'local' ? (
+          <LocalSignInForm onSignIn={(userData, token) => {
+            login(userData, token)
+            navigate('/account/orders')
+          }} />
+        ) : (
+          <CognitoSignInPanel onStart={startCognitoLogin} error={error} />
+        )}
       </div>
     )
   }
