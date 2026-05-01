@@ -898,9 +898,89 @@ Will take ~15 minutes (RDS deletion is the long pole). The state backend
 S3 bucket and DDB table from Step 1 are NOT destroyed by this — they are
 out-of-band manual resources, intentional.
 
-## Step 5 — GitHub repo secrets and variables (not yet done)
+## Step 5 — GitHub repo secrets, variables, and Environments
 
-To be filled in when executed.
+**Status: done** (configured at `https://github.com/HadiMchawrab/503Q-Project/settings`).
+
+This step plugs the values Terraform produced (Step 4) and the IAM role
+ARNs (Step 2) into GitHub so the workflows can authenticate to AWS and
+target the right cluster/registry. Nothing is created in AWS — this is
+pure GitHub configuration.
+
+### Repository secrets
+
+`Settings → Secrets and variables → Actions → Secrets`
+
+| Name | Value | Used by |
+|---|---|---|
+| `ROLE_TO_ASSUME_PROD` | `arn:aws:iam::621721788004:role/gh-actions-shopcloud-prod` | Both workflows when running on `main` / `prod` env |
+| `ROLE_TO_ASSUME_DEV` | `arn:aws:iam::621721788004:role/gh-actions-shopcloud-dev` | `deploy.yml` when running on `dev` / PRs |
+| `RDS_DB_PASSWORD` | (the 32-char string from `terraform.tfvars`) | `terraform.yml` as `TF_VAR_db_password` ([terraform.yml:71](../.github/workflows/terraform.yml#L71), [`:120`](../.github/workflows/terraform.yml#L120)) |
+
+**Drift warning.** `RDS_DB_PASSWORD` must match the value in the local
+`terraform.tfvars` and the version stored in Secrets Manager
+(`shopcloud/rds/password`). If they ever diverge, the next CI
+`terraform apply` will silently rewrite the RDS master password to match
+the GitHub secret. Rotate in all three places at once.
+
+### Repository variables
+
+`Settings → Secrets and variables → Actions → Variables`
+
+| Name | Value | Used by |
+|---|---|---|
+| `ECR_REGISTRY` | `621721788004.dkr.ecr.eu-west-1.amazonaws.com` | `deploy.yml` for `docker tag` / `docker push` ([deploy.yml:104](../.github/workflows/deploy.yml#L104)) |
+| `EKS_CLUSTER_NAME` | `shopcloud` | `deploy.yml` for `aws eks update-kubeconfig` ([deploy.yml:142](../.github/workflows/deploy.yml#L142)) |
+
+Variables differ from secrets in that they are visible in workflow logs.
+Both of these are non-sensitive (account ID is observable in any AWS API
+call; cluster name is non-secret), so variable scope is correct.
+
+### Environments
+
+`Settings → Environments`
+
+**`prod` environment:**
+
+| Setting | Value | Why |
+|---|---|---|
+| Required reviewers | `HadiMchawrab` | Pauses any deploy or `terraform apply` targeting prod until manually approved. The `prod` GitHub Environment is what `terraform.yml`'s apply job ([terraform.yml:99](../.github/workflows/terraform.yml#L99)) and `deploy.yml`'s deploy job ([deploy.yml:131](../.github/workflows/deploy.yml#L131)) attach to via `environment: prod`. |
+| Prevent self-review | unchecked | Solo project — checking it would lock you out (no one else can approve). On a team this should be on. |
+| Wait timer | unchecked | Optional cooldown; not needed here. |
+| Allow administrators to bypass | checked | Lets you override the approval gate in emergencies. Trade-off: weakens the gate. Off for stricter shops. |
+| Deployment branches | `main` only | Even a manual `workflow_dispatch` from another branch can't target this environment. |
+
+**`dev` environment:**
+
+- No required reviewers (auto-deploys on every push to `dev`)
+- Deployment branches: `dev` only
+
+The `dev`/`prod` Environment names also matter for OIDC. The role trust
+policies created in Step 2 condition on the JWT's `sub` claim, which
+takes the form `repo:<owner>/<repo>:environment:<env>` when a workflow
+job has `environment: <env>` set. So the Environment **name** must be
+exactly `prod` or `dev` for OIDC to succeed; mismatched names → role
+assumption fails with `AccessDenied`.
+
+### Verification
+
+The full chain only verifies end-to-end on the first workflow run
+(Step 6). What we can confirm now:
+
+```
+Settings → Actions → Secrets         shows: 3 secrets set
+Settings → Actions → Variables       shows: 2 variables set
+Settings → Environments              shows: prod (1 protection rule), dev
+```
+
+### Repo state after this step
+
+Unchanged. GitHub-side configuration only.
+
+### Rollback
+
+Delete the secrets/variables/environments in the GitHub UI. No AWS
+resources are touched.
 
 ## Step 6 — First push / deploy (not yet done)
 
