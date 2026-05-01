@@ -1,5 +1,5 @@
-# Invoices bucket. Lambda writes PDFs here; web/admin services hand out
-# 15-minute presigned URLs to customers. The bucket itself stays private.
+# Invoices bucket. Lambda writes PDFs here; the checkout/admin services hand
+# out 15-minute presigned URLs to customers. The bucket itself stays private.
 
 resource "aws_s3_bucket" "invoices" {
   bucket = var.bucket_name

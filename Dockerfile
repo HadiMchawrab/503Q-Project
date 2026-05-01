@@ -15,11 +15,14 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# All five backend services ship in the same image. Each k8s Deployment picks
+# its service via `command: ["uvicorn", "services.<name>.main:app", ...]`
+# (see k8s/base/*.yaml). The customer storefront is no longer in this image —
+# it ships as static assets to S3 + CloudFront, see infra/terraform/modules/s3_frontend.
 COPY shared ./shared
-COPY services/__init__.py ./services/__init__.py
-COPY services/checkout ./services/checkout
+COPY services ./services
 
 RUN chown -R shopcloud:shopcloud /app
 USER shopcloud
 
-CMD ["uvicorn", "services.checkout.main:app", "--host", "0.0.0.0", "--port", "3003"]
+CMD ["uvicorn", "services.auth.main:app", "--host", "0.0.0.0", "--port", "3004"]

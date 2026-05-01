@@ -97,15 +97,31 @@ resource "aws_wafv2_web_acl" "cloudfront" {
 }
 
 # ---------------------------------------------------------------------------
-# CloudFront — caches static assets and terminates TLS at the edge.
-# Origin is the public ALB managed by AWS Load Balancer Controller.
+# CloudFront — terminates TLS at the edge. Two origins:
+#   - "alb": the public ALB. Receives /api/* (uncached, dynamic).
+#   - "s3" : the storefront S3 bucket via OAC. Receives everything else (cached).
 # ---------------------------------------------------------------------------
-resource "aws_cloudfront_distribution" "this" {
-  enabled         = true
-  is_ipv6_enabled = true
-  web_acl_id      = aws_wafv2_web_acl.cloudfront.arn
-  comment         = "${var.name} edge"
 
+# Origin Access Control — replaces the older OAI mechanism. CloudFront signs
+# requests to S3 with SigV4 so the bucket can stay fully private.
+resource "aws_cloudfront_origin_access_control" "s3_frontend" {
+  count = var.frontend_bucket_regional_domain_name == "" ? 0 : 1
+
+  name                              = "${var.name}-s3-frontend"
+  description                       = "OAC for ${var.name} storefront bucket"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_distribution" "this" {
+  enabled             = true
+  is_ipv6_enabled     = true
+  web_acl_id          = aws_wafv2_web_acl.cloudfront.arn
+  comment             = "${var.name} edge"
+  default_root_object = var.frontend_bucket_regional_domain_name == "" ? null : "index.html"
+
+  # ALB origin (always present) — serves /api/*.
   origin {
     domain_name = var.alb_dns_name
     origin_id   = "alb"
@@ -118,7 +134,42 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
+  # S3 origin (optional) — serves the storefront static assets.
+  dynamic "origin" {
+    for_each = var.frontend_bucket_regional_domain_name == "" ? [] : [1]
+    content {
+      domain_name              = var.frontend_bucket_regional_domain_name
+      origin_id                = "s3"
+      origin_access_control_id = aws_cloudfront_origin_access_control.s3_frontend[0].id
+    }
+  }
+
+  # Default behavior — serves the storefront from S3 when configured, otherwise
+  # falls through to the ALB (legacy single-origin layout).
   default_cache_behavior {
+    target_origin_id       = var.frontend_bucket_regional_domain_name == "" ? "alb" : "s3"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+    cached_methods         = ["GET", "HEAD"]
+    compress               = true
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+
+    # S3 default: cache for an hour. Long-cache hashed asset URLs are handled
+    # by per-file Cache-Control headers set during `aws s3 sync` in CI.
+    min_ttl     = 0
+    default_ttl = var.frontend_bucket_regional_domain_name == "" ? 0 : 3600
+    max_ttl     = var.frontend_bucket_regional_domain_name == "" ? 0 : 86400
+  }
+
+  # /api/* — dynamic, always proxied to the ALB, never cached.
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
     target_origin_id       = "alb"
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
@@ -136,6 +187,19 @@ resource "aws_cloudfront_distribution" "this" {
     min_ttl     = 0
     default_ttl = 0
     max_ttl     = 0
+  }
+
+  # SPA-style routing: when CloudFront gets a 403/404 from S3 (deep link to a
+  # path that exists only client-side), serve index.html instead so the JS
+  # router can take over. Only meaningful when the S3 origin exists.
+  dynamic "custom_error_response" {
+    for_each = var.frontend_bucket_regional_domain_name == "" ? [] : [403, 404]
+    content {
+      error_code            = custom_error_response.value
+      response_code         = 200
+      response_page_path    = "/index.html"
+      error_caching_min_ttl = 0
+    }
   }
 
   restrictions {

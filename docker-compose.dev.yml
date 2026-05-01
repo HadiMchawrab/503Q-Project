@@ -26,11 +26,12 @@ services:
       timeout: 5s
       retries: 20
 
+  # All five backends share one image. Each service overrides `command` to
+  # pick its uvicorn entrypoint — matches what the K8s Deployments do.
   auth:
-    image: shopcloud-auth:local
-    build:
-      context: .
-      dockerfile: services/auth/Dockerfile
+    image: shopcloud-app:local
+    build: { context: ., dockerfile: Dockerfile }
+    command: ["uvicorn", "services.auth.main:app", "--host", "0.0.0.0", "--port", "3004"]
     env_file: .env
     environment:
       PORT: 3004
@@ -40,61 +41,62 @@ services:
         condition: service_healthy
 
   catalog:
-    image: shopcloud-catalog:local
-    build:
-      context: .
-      dockerfile: services/catalog/Dockerfile
+    image: shopcloud-app:local
+    command: ["uvicorn", "services.catalog.main:app", "--host", "0.0.0.0", "--port", "3001"]
     env_file: .env
     environment:
       PORT: 3001
       ROOT_PATH: /api/catalog
     depends_on:
+      auth:
+        condition: service_started   # ensures the image is built once before fan-out
       postgres:
         condition: service_healthy
 
   cart:
-    image: shopcloud-cart:local
-    build:
-      context: .
-      dockerfile: services/cart/Dockerfile
+    image: shopcloud-app:local
+    command: ["uvicorn", "services.cart.main:app", "--host", "0.0.0.0", "--port", "3002"]
     env_file: .env
     environment:
       PORT: 3002
       ROOT_PATH: /api/cart
     depends_on:
+      auth:
+        condition: service_started
       redis:
         condition: service_healthy
       catalog:
         condition: service_started
 
   checkout:
-    image: shopcloud-checkout:local
-    build:
-      context: .
-      dockerfile: services/checkout/Dockerfile
+    image: shopcloud-app:local
+    command: ["uvicorn", "services.checkout.main:app", "--host", "0.0.0.0", "--port", "3003"]
     env_file: .env
     environment:
       PORT: 3003
       ROOT_PATH: /api/checkout
     depends_on:
+      auth:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
   admin:
-    image: shopcloud-admin:local
-    build:
-      context: .
-      dockerfile: services/admin/Dockerfile
+    image: shopcloud-app:local
+    command: ["uvicorn", "services.admin.main:app", "--host", "0.0.0.0", "--port", "3005"]
     env_file: .env
     environment:
       PORT: 3005
       ROOT_PATH: /api/admin
     depends_on:
+      auth:
+        condition: service_started
       postgres:
         condition: service_healthy
 
+  # Admin-ui is a genuinely separate image (NGINX, not Python).
   admin-ui:
     image: shopcloud-admin-ui:local
     build:
@@ -108,23 +110,17 @@ services:
       admin:
         condition: service_started
 
-  web:
-    image: shopcloud-web:local
-    build:
-      context: .
-      dockerfile: web/Dockerfile
-    env_file: .env
-    environment:
-      PORT: 3000
-
+  # The customer storefront is plain static assets — no Python, no container of
+  # its own. The gateway serves them in dev; in prod the same files live in S3
+  # fronted by CloudFront (see infra/terraform/modules/s3_frontend).
   gateway:
     image: nginx:1.27-alpine
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:80"
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
     depends_on:
-      - web
       - auth
       - catalog
       - cart

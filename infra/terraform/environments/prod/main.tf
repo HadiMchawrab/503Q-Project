@@ -204,10 +204,23 @@ module "cognito" {
 }
 
 # ============================================================================
+# STOREFRONT — Static assets in S3, served via CloudFront (OAC).
+# CI does `aws s3 sync frontend/ s3://<bucket>` and invalidates the cache.
+# The bucket is private; only the CloudFront distribution can read it.
+# ============================================================================
+module "s3_frontend" {
+  count  = var.public_alb_dns_name == "" ? 0 : 1
+  source = "../../modules/s3_frontend"
+
+  bucket_name                 = "shopcloud-frontend-${data.aws_caller_identity.current.account_id}"
+  cloudfront_distribution_arn = module.edge[0].cloudfront_distribution_arn
+}
+
+# ============================================================================
 # EDGE — Route 53 latency routing + CloudFront + WAF
-# Pass the alb_dns_name from outside terraform (set after the AWS Load Balancer
-# Controller provisions the public ALB) or from a future ALB module.
-# When var.public_alb_dns_name is empty the module is skipped.
+# Two origins: the public ALB (for /api/*) and the storefront S3 bucket
+# (for everything else). When var.public_alb_dns_name is empty the module is
+# skipped and the storefront bucket is also skipped.
 # ============================================================================
 module "edge" {
   count  = var.public_alb_dns_name == "" ? 0 : 1
@@ -223,6 +236,13 @@ module "edge" {
   domain_name      = var.domain_name
   primary_region   = var.region
   secondary_region = "us-east-1"
+
+  # Two-pass apply: first apply has frontend_bucket_regional_domain_name = ""
+  # (the s3_frontend module references the CloudFront distribution which doesn't
+  # yet exist). Second apply, with this string set to the bucket's regional
+  # domain, adds the S3 origin + behaviors. Terraform handles the dependency
+  # via the `count` guard on s3_frontend; just apply twice on first deploy.
+  frontend_bucket_regional_domain_name = try(module.s3_frontend[0].bucket_regional_domain_name, "")
 }
 
 # ============================================================================

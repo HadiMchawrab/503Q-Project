@@ -43,8 +43,8 @@ Each service is a FastAPI app, one container per pod, 2 replicas minimum, spread
 │   ├── auth/
 │   └── admin/
 ├── shared/                  # shared Python modules (db, auth, queue)
-├── web/                     # customer storefront (React)
-├── admin-ui/                # internal admin console (React, served via NGINX)
+├── frontend/                # customer storefront static assets (HTML/JS/CSS) — shipped to S3 + CloudFront
+├── admin-ui/                # internal admin console (NGINX image, served via internal ALB)
 ├── gateway/                 # local dev NGINX reverse proxy
 ├── database/                # init.sql for local Postgres
 ├── lambda/
@@ -90,7 +90,7 @@ App changes go through CI — push to `main`, GitHub Actions builds and pushes i
 
 All five backend services share a single image (`shopcloud-app` in ECR). Each Deployment picks its service by overriding the uvicorn entrypoint (e.g. `services.auth.main:app` in [k8s/base/auth.yaml](k8s/base/auth.yaml)). Rollouts are atomic — one image tag promotes every backend service together.
 
-The customer storefront and the admin console ship as separate images (`web` is part of `shopcloud-app`; `admin-ui` is its own NGINX image). The admin console lives behind an internal ALB reachable only through VPN ([infra/terraform/modules/vpn/](infra/terraform/modules/vpn/)).
+The customer storefront is plain static assets in [frontend/](frontend/) — synced to S3 by CI and served via CloudFront, with `/api/*` falling through to the public ALB. The admin console ships as its own NGINX image (`admin-ui`) and lives behind an internal ALB reachable only through VPN ([infra/terraform/modules/vpn/](infra/terraform/modules/vpn/)).
 
 ## Configuration
 

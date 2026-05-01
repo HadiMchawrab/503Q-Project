@@ -97,12 +97,11 @@ jobs:
 
       - name: Build shopcloud-app image
         run: |
-          # All five backends share this image — Deployments override the
-          # uvicorn entrypoint to pick a service. We build with the auth
-          # service's Dockerfile because every services/*/Dockerfile produces
-          # the same final image (same shared/, same requirements.txt).
+          # Single image for all five backends. Each k8s Deployment picks its
+          # service via `command:` override. The storefront ships separately
+          # to S3 + CloudFront (see "Sync storefront to S3" below).
           docker build \
-            -f services/auth/Dockerfile \
+            -f Dockerfile \
             -t "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}" \
             .
 
@@ -176,7 +175,34 @@ jobs:
             echo "COGNITO_CUSTOMER_DOMAIN=$(out cognito_customer_hosted_ui_domain)"
             echo "COGNITO_ADMIN_DOMAIN=$(out cognito_admin_hosted_ui_domain)"
             echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
+            echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
+            echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Sync storefront to S3
+        # CloudFront → S3 serves the static frontend. Two passes:
+        #   1) sync hashed/long-lived assets with a 1-year immutable cache
+        #   2) sync index.html with no-cache so users always pick up the latest
+        #      reference to the hashed asset bundle
+        # Skipped if terraform hasn't provisioned the bucket yet (first deploy).
+        if: steps.tf_out.outputs.FRONTEND_BUCKET != ''
+        run: |
+          BUCKET="${{ steps.tf_out.outputs.FRONTEND_BUCKET }}"
+          DIST="${{ steps.tf_out.outputs.CLOUDFRONT_DISTRIBUTION_ID }}"
+
+          aws s3 sync frontend/ "s3://$BUCKET/" \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public, max-age=31536000, immutable"
+
+          aws s3 cp frontend/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache, no-store, must-revalidate"
+
+          if [[ -n "$DIST" ]]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "$DIST" \
+              --paths "/index.html" "/app.js" "/admin.js" "/cognito.js" "/styles.css"
+          fi
 
       - name: Configure overlay
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}
@@ -220,6 +246,6 @@ jobs:
       - name: Wait for rollout
         run: |
           NS="${{ needs.resolve.outputs.namespace }}"
-          for d in auth catalog cart checkout admin admin-ui web; do
+          for d in auth catalog cart checkout admin admin-ui; do
             kubectl -n "$NS" rollout status deployment/$d --timeout=5m
           done

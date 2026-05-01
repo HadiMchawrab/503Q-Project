@@ -16,7 +16,6 @@ resources:
   - checkout.yaml
   - admin.yaml
   - admin-ui.yaml
-  - web.yaml
   - ingress.yaml
   - ingress-admin.yaml
   - hpa.yaml

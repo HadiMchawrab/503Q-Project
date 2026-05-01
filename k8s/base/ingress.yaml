@@ -48,9 +48,6 @@ spec:
               service:
                 name: checkout
                 port: { number: 3003 }
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: web
-                port: { number: 3000 }
+          # No catch-all `/` — the storefront is served by CloudFront from S3,
+          # not by this ALB. CloudFront's path-based behavior routes /api/* here
+          # and everything else to the S3 origin (see infra/terraform/modules/edge).

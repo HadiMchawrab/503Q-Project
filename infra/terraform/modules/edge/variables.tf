@@ -31,3 +31,9 @@ variable "secondary_region" {
   type        = string
   default     = "us-east-1"
 }
+
+variable "frontend_bucket_regional_domain_name" {
+  description = "Regional domain name of the storefront S3 bucket (module.s3_frontend.bucket_regional_domain_name). Empty disables the static origin and CloudFront sends every path to the ALB."
+  type        = string
+  default     = ""
+}

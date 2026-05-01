@@ -77,7 +77,18 @@ output "cognito_admin_hosted_ui_domain" {
 # Edge
 output "cloudfront_domain_name" {
   description = "CNAME this from your DNS provider if hosted_zone_id is empty."
-  value       = module.edge.cloudfront_domain_name
+  value       = try(module.edge[0].cloudfront_domain_name, "")
+}
+
+output "cloudfront_distribution_id" {
+  description = "Pass to `aws cloudfront create-invalidation` after pushing new static assets."
+  value       = try(module.edge[0].cloudfront_distribution_id, "")
+}
+
+# Storefront
+output "frontend_bucket_name" {
+  description = "S3 bucket holding storefront static assets. CI runs `aws s3 sync frontend/ s3://<this>`."
+  value       = try(module.s3_frontend[0].bucket_name, "")
 }
 
 # DR

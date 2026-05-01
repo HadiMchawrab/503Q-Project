@@ -41,4 +41,3 @@ replicas:
   - { name: cart,     count: 1 }
   - { name: checkout, count: 1 }
   - { name: admin,    count: 1 }
-  - { name: web,      count: 1 }
