@@ -130,3 +130,10 @@ output "invoice_worker_irsa_role_arn" {
   description = "Annotate the invoice-worker K8s service account with this role ARN."
   value       = module.irsa_invoice_worker.role_arn
 }
+
+# AWS Load Balancer Controller -- pass to the helm install in deploy.yml so
+# the controller's ServiceAccount in kube-system gets the right role ARN.
+output "alb_controller_role_arn" {
+  description = "Annotate the aws-load-balancer-controller K8s service account with this role ARN."
+  value       = module.irsa_alb_controller.role_arn
+}

@@ -8,7 +8,7 @@ commonLabels:
   app.kubernetes.io/part-of: shopcloud
 
 resources:
-  - ../app-configmap.yaml
+  - app-configmap.yaml
   - secrets.yaml
   - auth.yaml
   - catalog.yaml

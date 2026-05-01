@@ -159,11 +159,26 @@ jobs:
 
       - name: Push images
         if: needs.resolve.outputs.should_deploy == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.image_tag }}
         run: |
-          docker push "$ECR_REGISTRY/shopcloud-app:${{ steps.tag.outputs.image_tag }}"
-          docker push "$ECR_REGISTRY/admin-ui:${{ steps.tag.outputs.image_tag }}"
+          # ECR repos are IMMUTABLE (modules/storage), so re-pushing the same
+          # SHA tag returns "tag invalid: ... already exists ... immutable".
+          # That is the desired safety, not an error: the image is already
+          # in the registry, which is all the deploy step needs. Skip push
+          # if the tag exists; otherwise push.
+          push_if_new() {
+            local repo="$1"
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "skip: $repo:$TAG already in ECR"
+            else
+              docker push "$ECR_REGISTRY/$repo:$TAG"
+            fi
+          }
+          push_if_new shopcloud-app
+          push_if_new admin-ui
           if [[ "${{ needs.resolve.outputs.environment }}" == "prod" ]]; then
-            docker push "$ECR_REGISTRY/invoice-worker:${{ steps.tag.outputs.image_tag }}"
+            push_if_new invoice-worker
           fi
 
   # ----------------------------------------------------------------------------
@@ -243,6 +258,8 @@ jobs:
             echo "INVOICES_BUCKET=$(out invoice_bucket_name)"
             echo "DB_HOST=$(out rds_endpoint)"
             echo "DB_SECRET_ARN=$(out db_secret_arn)"
+            # ElastiCache primary endpoint, used to build REDIS_URL for both envs.
+            echo "REDIS_HOST=$(out redis_endpoint)"
             echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
             echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
             # GitHub masks this in logs because it's marked sensitive.
@@ -293,11 +310,18 @@ jobs:
             kustomize edit set image "invoice-worker=$ECR_REGISTRY/invoice-worker:$TAG"
           fi
 
-          # 2) Merge real config values from terraform outputs into the
-          #    shopcloud-config ConfigMap (the base has empty placeholders).
+          # 2) Merge env-specific config into the shopcloud-config ConfigMap.
+          #    Dev gets INVOICE_QUEUE_URL='' so checkout's publish_invoice_event
+          #    is a no-op (avoids dev orders going through the prod SQS path).
+          #    Cognito values are the same across envs (one user pool per kind).
+          if [[ "$ENV" == "prod" ]]; then
+            INVOICE_QUEUE_URL_VAL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}'
+          else
+            INVOICE_QUEUE_URL_VAL=''
+          fi
           kustomize edit add configmap shopcloud-config \
             --behavior=merge \
-            --from-literal=INVOICE_QUEUE_URL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}' \
+            --from-literal=INVOICE_QUEUE_URL="$INVOICE_QUEUE_URL_VAL" \
             --from-literal=COGNITO_USER_POOL_ID='${{ steps.tf_out.outputs.COGNITO_USER_POOL_ID }}' \
             --from-literal=COGNITO_ADMIN_POOL_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_POOL_ID }}' \
             --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
@@ -307,9 +331,17 @@ jobs:
 
           # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
           #     the shared RDS instance based on the resolved environment.
+          #     REDIS_URL points at the ElastiCache primary endpoint (same for
+          #     both envs; carts are namespaced via CART_KEY_PREFIX).
+          #     `kustomize edit add secret` (5.4.x) does NOT accept --behavior;
+          #     the overlay's secretGenerator already declares behavior: merge,
+          #     and this command appends into that existing block.
+          # rediss:// (TLS) — ElastiCache has TransitEncryptionEnabled=true,
+          # so plain redis:// connections hang on the TLS handshake without
+          # surfacing a clear error.
           kustomize edit add secret shopcloud-secrets \
-            --behavior=merge \
-            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}'
+            --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}' \
+            --from-literal=REDIS_URL='rediss://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
 
           # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
           #     DB_HOST/NAME/USER/SECRET_ARN. The base placeholders are

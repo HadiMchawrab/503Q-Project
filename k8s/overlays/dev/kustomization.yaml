@@ -19,25 +19,34 @@ images:
     newName: REPLACE_WITH_ECR_URL/admin-ui
     newTag: placeholder-set-by-ci
 
-# Dev does NOT process invoices — leaving INVOICE_QUEUE_URL empty makes
-# checkout's publish_invoice_event a no-op (see shared/queue.py).
-# Avoids dev orders sending real emails through the prod SQS/Lambda/SES path.
 # CART_KEY_PREFIX namespaces Redis keys so dev and prod carts don't collide
 # on the shared ElastiCache instance.
+#
+# All other env-specific keys (INVOICE_QUEUE_URL, Cognito IDs, etc.) are
+# filled by deploy.yml via `kustomize edit add configmap --from-literal=...`.
+# Those keys must NOT be pre-listed here — kustomize edit cannot replace
+# existing literals, only append, and a duplicate key causes the apply to
+# fail with "illegally repeats the key".
+#
+# Dev specifically: deploy.yml writes INVOICE_QUEUE_URL="" for dev so
+# checkout's publish_invoice_event is a no-op (see shared/queue.py),
+# avoiding dev orders sending real emails through the prod SQS/Lambda path.
 configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
-      - INVOICE_QUEUE_URL=
-      - CART_KEY_PREFIX=cart:dev:
+      - "CART_KEY_PREFIX=cart:dev:"
 
 # DATABASE_URL points dev pods at the shopcloud_dev database on the shared RDS.
 # CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL
+# DATABASE_URL is NOT pre-listed because `kustomize edit add secret` (in
+# kustomize 5.4.x) only appends — pre-listing causes "illegally repeats the
+# key" at apply. The block stays so `behavior: merge` is preserved when CI
+# appends DATABASE_URL.
 secretGenerator:
   - name: shopcloud-secrets
     behavior: merge
-    literals:
-      - DATABASE_URL=REPLACE_WITH_TERRAFORM_OUTPUT_RDS_URL_DEV
+    literals: []
 
 patches:
   - path: checkout-sa-patch.yaml
