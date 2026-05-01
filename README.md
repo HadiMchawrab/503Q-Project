@@ -11,8 +11,8 @@ Small e-commerce platform running on AWS. Five backend services plus a separate 
 - **Auth:** Cognito (separate customer + admin pools, JWT)
 - **Async:** SQS + Lambda (PDF rendering) + S3 + SES
 - **Infra:** Terraform
-- **Runtime:** EKS, Helm, Argo CD
-- **CI/CD:** GitHub Actions → ECR → Argo CD
+- **Runtime:** EKS, Kustomize
+- **CI/CD:** GitHub Actions → ECR → EKS
 
 ## Services
 
@@ -37,45 +37,44 @@ Each service is a FastAPI app, one container per pod, 2 replicas minimum, spread
 ```
 .
 ├── services/
-│   ├── catalog/        # FastAPI service
+│   ├── catalog/             # FastAPI service
 │   ├── cart/
 │   ├── checkout/
 │   ├── auth/
 │   └── admin/
-├── web/                # React frontend
+├── shared/                  # shared Python modules (db, auth, queue)
+├── web/                     # customer storefront (React)
+├── admin-ui/                # internal admin console (React, served via NGINX)
+├── gateway/                 # local dev NGINX reverse proxy
+├── database/                # init.sql for local Postgres
 ├── lambda/
-│   └── invoice-pdf/    # triggered by SQS
+│   └── invoice_generator/   # triggered by SQS, renders PDF + emails via SES
 ├── infra/
-│   └── terraform/      # VPC, EKS, RDS, Redis, Cognito, SQS, etc.
-├── deploy/
-│   ├── helm/           # per-service charts
-│   └── argocd/         # app definitions
-└── .github/workflows/
+│   └── terraform/           # VPC, EKS, RDS, Redis, Cognito, SQS, VPN, etc.
+├── k8s/                     # Kustomize base + dev/prod overlays
+└── scripts/
 ```
 
 ## Running locally
 
-Each service has its own `docker-compose.yml` for dev. The whole stack comes up with:
+Copy `.env.example` to `.env` at the repo root, then bring the whole stack up with:
 
 ```
 docker compose -f docker-compose.dev.yml up
 ```
 
-This gives you Postgres, Redis, LocalStack (for SQS/S3/SES), the storefront, the admin API, and the internal admin console on separate endpoints. Frontend runs separately:
+This builds and starts Postgres, Redis, all five backend services, the customer storefront, the admin console, and an NGINX gateway that fronts them.
 
-```
-cd web
-npm install
-npm run dev
-```
+Endpoints:
 
-Admin console:
+| URL                       | What                                       |
+|---------------------------|--------------------------------------------|
+| http://localhost:8080     | Gateway → storefront + `/api/*` routes     |
+| http://localhost:8081     | Admin console (admin-ui)                   |
+| localhost:55432           | Postgres                                   |
+| localhost:6380            | Redis                                      |
 
-```text
-http://localhost:8081
-```
-
-Copy `.env.example` to `.env` in each service before starting.
+Invoice/SQS/SES flow is no-op'd locally: leave `INVOICE_QUEUE_URL` empty and `checkout` skips publishing (see [shared/queue.py](shared/queue.py)). Auth falls back to local HS256 JWTs signed with `JWT_SECRET` when Cognito vars are unset.
 
 ## Deploying
 
@@ -87,13 +86,11 @@ terraform plan
 terraform apply
 ```
 
-App changes go through CI — push to `main`, the image gets built and pushed to ECR, Argo CD picks up the new tag and rolls it out. No manual `kubectl apply`.
+App changes go through CI — push to `main`, GitHub Actions builds and pushes images to ECR, then applies the relevant Kustomize overlay under [k8s/overlays/](k8s/overlays/) against the cluster.
 
-Each backend service should have its own image tag in ECR, even if the services share the same Dockerfile and codebase. That keeps rollouts and scaling isolated per service.
+Each backend service has its own image tag in ECR, even though several services share the same Dockerfile pattern. That keeps rollouts and scaling isolated per service.
 
-The customer storefront and the admin console are now split into separate frontend images and endpoints. In AWS, the admin console should live behind an internal ALB reachable only through VPN.
-
-The repo now follows a split-Dockerfile layout: one Dockerfile per app service plus one for the web storefront and one for the admin console. That makes the ECR images map directly to Kubernetes Deployments.
+The customer storefront and the admin console are split into separate frontend images and endpoints. In AWS, the admin console lives behind an internal ALB reachable only through VPN ([infra/terraform/modules/vpn/](infra/terraform/modules/vpn/)).
 
 ## Configuration
 
@@ -103,9 +100,9 @@ Pods get AWS permissions via IRSA — each ServiceAccount is bound to a scoped I
 
 ## Scaling
 
-- **HPA** on CPU/memory for every service
+- **HPA** on CPU/memory for every service ([k8s/base/hpa.yaml](k8s/base/hpa.yaml))
 - **Cluster Autoscaler** adds nodes when pods pend
-- **KEDA** available if we move invoice workers into the cluster later
+- **KEDA** scales invoice processing on SQS queue depth ([k8s/base/keda-invoice-scaler.yaml](k8s/base/keda-invoice-scaler.yaml))
 
 ## Regions
 
