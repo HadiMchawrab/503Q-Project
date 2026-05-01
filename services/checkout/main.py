@@ -162,13 +162,17 @@ async def checkout(payload: CheckoutRequest, user: dict[str, Any] = Depends(curr
 
     await clear_cart(user["sub"])
 
+    # Cognito tokens don't always carry a `name` claim (depends on whether the
+    # user pool collects it on signup — ours is email-only). Fall back through
+    # cognito:username then email so the invoice always has something to print.
+    customer_name = user.get("name") or user.get("cognito:username") or user["email"]
     await publish_invoice_event(
         {
             "type": "invoice.requested",
             "orderId": str(created_order["id"]),
             "userId": user["sub"],
             "customerEmail": user["email"],
-            "customerName": user["name"],
+            "customerName": customer_name,
             "createdAt": datetime.now(timezone.utc).isoformat(),
         }
     )
