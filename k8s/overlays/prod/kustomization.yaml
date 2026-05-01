@@ -25,29 +25,17 @@ images:
     newName: REPLACE_WITH_ECR_URL/invoice-worker
     newTag: placeholder-set-by-ci
 
-# Per-environment config overrides. CI fills the placeholders from terraform
-# outputs before applying. CART_KEY_PREFIX namespaces Redis keys for prod;
-# the DATABASE_URL in shopcloud-secrets points at the shopcloud_prod database.
+# CART_KEY_PREFIX namespaces Redis keys per env. All other env-specific
+# values (INVOICE_QUEUE_URL, Cognito IDs, INVOICES_BUCKET, SES_SENDER,
+# DB_*) are filled by deploy.yml via `kustomize edit add configmap
+# --from-literal=...`. Those keys must NOT be pre-listed here — kustomize
+# edit cannot replace existing literals, only append, and a duplicate key
+# causes the apply to fail with "illegally repeats the key".
 configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
-      - "INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT"
       - "CART_KEY_PREFIX=cart:prod:"
-      # invoice-worker reads these (mirror of the Lambda env). Filled in by CI:
-      #   kustomize edit add configmap shopcloud-config \
-      #     --from-literal=INVOICES_BUCKET=$(terraform output -raw invoice_bucket_name) \
-      #     --from-literal=SES_SENDER=invoices@shopcloud.com \
-      #     --from-literal=DB_HOST=$(terraform output -raw rds_endpoint) \
-      #     --from-literal=DB_NAME=shopcloud_prod \
-      #     --from-literal=DB_USER=shopcloud \
-      #     --from-literal=DB_SECRET_ARN=$(terraform output -raw db_secret_arn)
-      - INVOICES_BUCKET=REPLACE_WITH_TERRAFORM_OUTPUT
-      - SES_SENDER=REPLACE_WITH_TERRAFORM_OUTPUT
-      - DB_HOST=REPLACE_WITH_TERRAFORM_OUTPUT
-      - DB_NAME=shopcloud_prod
-      - DB_USER=shopcloud
-      - DB_SECRET_ARN=REPLACE_WITH_TERRAFORM_OUTPUT
 
 # DATABASE_URL is generated here so the prod password never lives in git.
 # CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL

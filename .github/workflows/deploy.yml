@@ -250,11 +250,18 @@ jobs:
             kustomize edit set image "invoice-worker=$ECR_REGISTRY/invoice-worker:$TAG"
           fi
 
-          # 2) Merge real config values from terraform outputs into the
-          #    shopcloud-config ConfigMap (the base has empty placeholders).
+          # 2) Merge env-specific config into the shopcloud-config ConfigMap.
+          #    Dev gets INVOICE_QUEUE_URL='' so checkout's publish_invoice_event
+          #    is a no-op (avoids dev orders going through the prod SQS path).
+          #    Cognito values are the same across envs (one user pool per kind).
+          if [[ "$ENV" == "prod" ]]; then
+            INVOICE_QUEUE_URL_VAL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}'
+          else
+            INVOICE_QUEUE_URL_VAL=''
+          fi
           kustomize edit add configmap shopcloud-config \
             --behavior=merge \
-            --from-literal=INVOICE_QUEUE_URL='${{ steps.tf_out.outputs.INVOICE_QUEUE_URL }}' \
+            --from-literal=INVOICE_QUEUE_URL="$INVOICE_QUEUE_URL_VAL" \
             --from-literal=COGNITO_USER_POOL_ID='${{ steps.tf_out.outputs.COGNITO_USER_POOL_ID }}' \
             --from-literal=COGNITO_ADMIN_POOL_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_POOL_ID }}' \
             --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
