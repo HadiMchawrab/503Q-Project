@@ -110,17 +110,23 @@ services:
       admin:
         condition: service_started
 
-  # The customer storefront is plain static assets — no Python, no container of
-  # its own. The gateway serves them in dev; in prod the same files live in S3
-  # fronted by CloudFront (see infra/terraform/modules/s3_frontend).
+  # React storefront — built inside Docker, served via its own nginx container.
+  # In prod the same assets live in S3 fronted by CloudFront.
+  frontend:
+    image: shopcloud-frontend:local
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+
   gateway:
     image: nginx:1.27-alpine
     ports:
       - "${GATEWAY_HOST_PORT:-8090}:80"
     volumes:
       - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
+      - frontend
       - auth
       - catalog
       - cart

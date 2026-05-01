@@ -33,10 +33,7 @@ export default function Header({ onSearch }) {
     <header className="hdr">
       {/* ── Logo ── */}
       <button className="hdr-logo" onClick={() => navigate('/')}>
-        <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
-          <rect width="34" height="34" rx="7" fill="#D4AF37" />
-          <text x="7" y="25" fontSize="19" fontWeight="800" fill="#2D0A13" fontFamily="Inter,sans-serif">Q</text>
-        </svg>
+        <img src="/logo.png" alt="503Q" className="hdr-logo-img" />
         <span className="hdr-logo-text">503<span>Q</span></span>
       </button>
 
