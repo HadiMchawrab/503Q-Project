@@ -1,0 +1,9 @@
+# IRSA annotation on the invoice-worker service account (defined in
+# k8s/base/keda-invoice-scaler.yaml). The role ARN comes from
+# `terraform output -raw invoice_worker_irsa_role_arn`.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: invoice-worker
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-invoice-worker

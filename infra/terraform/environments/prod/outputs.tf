@@ -58,6 +58,11 @@ output "invoice_lambda_ecr_url" {
   value       = module.lambda_invoice.ecr_repository_url
 }
 
+output "db_secret_arn" {
+  description = "Secrets Manager ARN holding the RDS master password — read by the invoice Lambda and the in-cluster invoice-worker."
+  value       = aws_secretsmanager_secret.db_password.arn
+}
+
 output "checkout_irsa_role_arn" {
   description = "Annotate the prod/checkout K8s service account with this role ARN so the pod can call sqs:SendMessage."
   value       = module.irsa_checkout.role_arn
@@ -108,6 +113,20 @@ output "frontend_bucket_name" {
 
 # DR
 output "rds_replica_endpoint" {
-  description = "us-east-1 read replica endpoint."
-  value       = aws_db_instance.replica_us_east_1.address
+  description = "us-east-1 read replica endpoint. Empty when enable_cross_region_replica = false."
+  value       = try(aws_db_instance.replica_us_east_1[0].address, "")
+}
+
+# Cluster Autoscaler — annotate the kube-system/cluster-autoscaler ServiceAccount
+# with this ARN so the autoscaler Deployment can call EC2 Auto Scaling.
+output "cluster_autoscaler_role_arn" {
+  description = "Annotate the cluster-autoscaler K8s service account with this role ARN."
+  value       = module.irsa_cluster_autoscaler.role_arn
+}
+
+# Invoice worker — annotate the invoice-worker ServiceAccount in the app
+# namespace so the KEDA-scaled pod can consume SQS / write S3 / send SES.
+output "invoice_worker_irsa_role_arn" {
+  description = "Annotate the invoice-worker K8s service account with this role ARN."
+  value       = module.irsa_invoice_worker.role_arn
 }

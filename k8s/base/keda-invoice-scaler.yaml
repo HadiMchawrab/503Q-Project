@@ -1,10 +1,16 @@
-# KEDA ScaledObject — scales the invoice consumer Deployment based on SQS queue depth.
+# KEDA ScaledObject — scales the invoice-worker Deployment based on SQS queue depth.
 # Requires KEDA installed in the cluster (kedacore/keda Helm chart).
 #
-# Note: today the invoice processor runs as a Lambda (see infra/terraform/modules/lambda).
-# This manifest is the K8s equivalent for when consumers move into the cluster — it is
-# applied alongside an `invoice-worker` Deployment with the same service account.
-# Until that Deployment exists this resource is a no-op (KEDA ignores missing targets).
+# The Deployment lives in invoice-worker.yaml; both reference the same
+# `invoice-worker` ServiceAccount (defined below) which the prod overlay
+# annotates with the IRSA role ARN exported as `invoice_worker_irsa_role_arn`.
+#
+# Production note: the Lambda at modules/lambda is still wired to SQS via an
+# event source mapping. Don't run BOTH consumers at once on the same queue;
+# disable one before enabling the other.
+#
+# The queueURL field below is a placeholder; the per-env kustomize overlay
+# patches it from the `invoice_queue_url` Terraform output.
 ---
 apiVersion: v1
 kind: ServiceAccount

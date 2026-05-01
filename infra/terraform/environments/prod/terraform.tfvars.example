@@ -2,3 +2,18 @@
 # terraform.tfvars is gitignored — never commit secrets.
 
 db_password = "change-me-to-something-strong"
+
+# DR — provisions a cross-region RDS read replica in us-east-1.
+# Promote manually if eu-west-1 has a regional outage.
+enable_cross_region_replica = true
+
+# Admin Client VPN — set enable_client_vpn = true after the ACM cert ARNs and
+# a SAML provider exist. The SAML provider is what enforces MFA (AWS Client
+# VPN delegates the second factor to the IdP). Typical IdP options:
+#   - The admin Cognito user pool federated as a SAML IdP (already MFA=ON)
+#   - Okta / Entra ID / Google Workspace
+# Leave vpn_saml_provider_arn empty to run cert-only (dev/test).
+# enable_client_vpn        = true
+# vpn_server_cert_arn      = "arn:aws:acm:eu-west-1:...:certificate/..."
+# vpn_client_root_cert_arn = "arn:aws:acm:eu-west-1:...:certificate/..."
+# vpn_saml_provider_arn    = "arn:aws:iam::...:saml-provider/shopcloud-admins"

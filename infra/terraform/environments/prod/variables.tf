@@ -48,7 +48,7 @@ variable "enable_client_vpn" {
 variable "enable_cross_region_replica" {
   description = "Whether to provision the us-east-1 RDS read replica for DR."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "vpn_server_cert_arn" {
@@ -59,6 +59,18 @@ variable "vpn_server_cert_arn" {
 
 variable "vpn_client_root_cert_arn" {
   description = "ACM ARN of the client root CA cert used to verify admin client certs."
+  type        = string
+  default     = ""
+}
+
+variable "vpn_saml_provider_arn" {
+  description = <<-EOT
+    IAM SAML provider ARN that fronts the Client VPN. When set, admins must
+    pass BOTH a client cert and a SAML login (with MFA enforced by the IdP)
+    to bring up the tunnel. Typically this is the admin Cognito user pool
+    federated as a SAML IdP, or an external IdP like Okta / Entra ID.
+    Leave empty to fall back to certificate-only auth.
+  EOT
   type        = string
   default     = ""
 }

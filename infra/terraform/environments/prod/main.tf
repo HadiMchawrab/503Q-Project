@@ -106,7 +106,9 @@ module "data" {
 module "storage" {
   source = "../../modules/storage"
 
-  services = ["shopcloud-app", "admin-ui"]
+  # invoice-worker is the KEDA-scaled in-cluster SQS consumer (mirror of the
+  # Lambda) — it ships as its own image, see services/invoice_worker/Dockerfile.
+  services = ["shopcloud-app", "admin-ui", "invoice-worker"]
 }
 
 
@@ -195,6 +197,104 @@ module "irsa_checkout" {
   policy_json          = data.aws_iam_policy_document.checkout_sqs.json
 }
 
+# ----------------------------------------------------------------------------
+# IRSA — Cluster Autoscaler. The autoscaler Deployment in kube-system watches
+# for Pending pods that don't fit on existing nodes and grows the EKS managed
+# node group via the EC2 Auto Scaling API. Without this role, HPA can scale
+# pods up to the point existing nodes are full and then stalls.
+# ----------------------------------------------------------------------------
+data "aws_iam_policy_document" "cluster_autoscaler" {
+  statement {
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
+      "eks:DescribeNodegroup",
+    ]
+    resources = ["*"]
+  }
+
+  # Mutating actions are scoped to ASGs tagged for this cluster.
+  statement {
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/${module.eks.cluster_name}"
+      values   = ["owned"]
+    }
+  }
+}
+
+module "irsa_cluster_autoscaler" {
+  source = "../../modules/iam_irsa"
+
+  role_name            = "shopcloud-cluster-autoscaler"
+  namespace            = "kube-system"
+  service_account_name = "cluster-autoscaler"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_provider_url    = module.eks.oidc_provider_url
+  policy_json          = data.aws_iam_policy_document.cluster_autoscaler.json
+}
+
+# ----------------------------------------------------------------------------
+# IRSA — invoice-worker pod (KEDA-scaled SQS consumer). Mirror of the Lambda
+# permissions: receive/delete from the invoice queue, write to the invoice
+# bucket, send via SES, read the DB password from Secrets Manager. Same
+# ServiceAccount name (invoice-worker) as in keda-invoice-scaler.yaml.
+# ----------------------------------------------------------------------------
+data "aws_iam_policy_document" "invoice_worker" {
+  statement {
+    sid    = "ConsumeQueue"
+    actions = [
+      "sqs:ReceiveMessage",
+      "sqs:DeleteMessage",
+      "sqs:GetQueueAttributes",
+      "sqs:ChangeMessageVisibility",
+      "sqs:GetQueueUrl",
+    ]
+    resources = [module.messaging.queue_arn]
+  }
+
+  statement {
+    sid       = "WriteInvoices"
+    actions   = ["s3:PutObject", "s3:PutObjectAcl", "s3:GetObject"]
+    resources = ["${module.s3_invoices.bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "SendEmail"
+    actions   = ["ses:SendEmail", "ses:SendRawEmail"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadDbSecret"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.db_password.arn]
+  }
+}
+
+module "irsa_invoice_worker" {
+  source = "../../modules/iam_irsa"
+
+  role_name            = "shopcloud-invoice-worker"
+  namespaces           = ["prod", "dev"]
+  service_account_name = "invoice-worker"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_provider_url    = module.eks.oidc_provider_url
+  policy_json          = data.aws_iam_policy_document.invoice_worker.json
+}
+
 # ============================================================================
 # IDENTITY — Cognito user pools (customers + admins)
 # ============================================================================
@@ -277,4 +377,7 @@ module "vpn" {
   subnet_ids               = module.network.private_subnet_ids
   acm_server_cert_arn      = var.vpn_server_cert_arn
   acm_client_root_cert_arn = var.vpn_client_root_cert_arn
+  # When set, enforces SAML+MFA on top of the client cert. Leave empty for
+  # cert-only (dev). The diagram requires cert+MFA for production.
+  saml_provider_arn = var.vpn_saml_provider_arn
 }

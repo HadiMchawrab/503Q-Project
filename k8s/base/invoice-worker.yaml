@@ -1,0 +1,51 @@
+# Invoice worker — SQS consumer that mirrors the Lambda at
+# lambda/invoice_generator. Runs in the cluster so KEDA can scale it
+# (see keda-invoice-scaler.yaml). The ServiceAccount lives in that file
+# because KEDA's TriggerAuthentication references it; this manifest only
+# defines the Deployment.
+#
+# Choose ONE consumer in production: either keep the Lambda + event source
+# mapping (default, see modules/lambda) OR scale this Deployment via KEDA.
+# Running both racing on the same queue is undefined.
+#
+# Replicas start at 0 so the Deployment doesn't pin a pod when KEDA is in
+# control. KEDA's ScaledObject will set replicas to 1+ when SQS depth > 0
+# and back to 0 after the cooldown window. Without KEDA installed, leave
+# this Deployment at 0 — orders are processed by the Lambda.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: invoice-worker
+  labels: { app: invoice-worker }
+spec:
+  replicas: 0
+  selector:
+    matchLabels: { app: invoice-worker }
+  template:
+    metadata:
+      labels: { app: invoice-worker }
+    spec:
+      # Defined in keda-invoice-scaler.yaml — IRSA-annotated by the overlay.
+      serviceAccountName: invoice-worker
+      terminationGracePeriodSeconds: 75
+      containers:
+        - name: invoice-worker
+          # Built from services/invoice_worker/Dockerfile and pushed to a
+          # dedicated ECR repo. The overlay rewrites this via `kustomize edit
+          # set image invoice-worker=$REG/invoice-worker:$TAG`.
+          image: invoice-worker:latest
+          env:
+            - name: SQS_WAIT_SECONDS
+              value: "20"
+            - name: SQS_BATCH_SIZE
+              value: "5"
+            - name: SQS_VISIBILITY_TIMEOUT
+              value: "60"
+          envFrom:
+            # INVOICES_BUCKET, SES_SENDER, DB_HOST, DB_NAME, DB_USER,
+            # DB_SECRET_ARN, INVOICE_QUEUE_URL — same keys the Lambda reads.
+            - configMapRef: { name: shopcloud-config }
+            - secretRef: { name: shopcloud-secrets }
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits:   { cpu: 500m, memory: 384Mi }

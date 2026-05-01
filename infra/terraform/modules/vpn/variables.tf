@@ -33,3 +33,25 @@ variable "acm_client_root_cert_arn" {
   description = "ACM ARN of the client root CA cert used to verify admin client certs."
   type        = string
 }
+
+variable "saml_provider_arn" {
+  description = <<-EOT
+    Optional IAM SAML provider ARN. When set, the endpoint requires both a
+    client certificate AND a SAML login (which the IdP enforces with MFA),
+    matching the cert+MFA admin path in the architecture diagram. Leave empty
+    to fall back to certificate-only auth (dev/test).
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "self_service_saml_provider_arn" {
+  description = <<-EOT
+    Optional IAM SAML provider ARN used by the AWS Client VPN self-service
+    portal (where admins download their .ovpn config). Usually points at the
+    same IdP as saml_provider_arn. Required by AWS when saml_provider_arn is
+    set; if you leave this empty the module reuses saml_provider_arn.
+  EOT
+  type        = string
+  default     = ""
+}

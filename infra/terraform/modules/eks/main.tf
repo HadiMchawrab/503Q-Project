@@ -109,6 +109,13 @@ resource "aws_eks_node_group" "this" {
     max_unavailable = 1
   }
 
+  # Cluster Autoscaler discovers managed node groups via these tags.
+  # The autoscaler Deployment uses --node-group-auto-discovery to pick them up.
+  tags = {
+    "k8s.io/cluster-autoscaler/enabled"         = "true"
+    "k8s.io/cluster-autoscaler/${var.name}"     = "owned"
+  }
+
   depends_on = [
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,

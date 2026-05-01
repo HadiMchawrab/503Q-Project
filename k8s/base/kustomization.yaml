@@ -20,3 +20,4 @@ resources:
   - ingress-admin.yaml
   - hpa.yaml
   - keda-invoice-scaler.yaml
+  - invoice-worker.yaml
