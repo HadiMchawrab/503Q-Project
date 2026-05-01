@@ -278,9 +278,12 @@ jobs:
           #     `kustomize edit add secret` (5.4.x) does NOT accept --behavior;
           #     the overlay's secretGenerator already declares behavior: merge,
           #     and this command appends into that existing block.
+          # rediss:// (TLS) — ElastiCache has TransitEncryptionEnabled=true,
+          # so plain redis:// connections hang on the TLS handshake without
+          # surfacing a clear error.
           kustomize edit add secret shopcloud-secrets \
             --from-literal=DATABASE_URL='${{ steps.tf_out.outputs.DATABASE_URL }}' \
-            --from-literal=REDIS_URL='redis://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
+            --from-literal=REDIS_URL='rediss://${{ steps.tf_out.outputs.REDIS_HOST }}:6379'
 
           # 2c) Prod-only: invoice-worker pod reads INVOICES_BUCKET, SES_SENDER,
           #     DB_HOST/NAME/USER/SECRET_ARN. The base placeholders are
