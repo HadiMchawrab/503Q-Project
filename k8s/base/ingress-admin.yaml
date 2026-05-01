@@ -1,7 +1,14 @@
 # Admin ingress — internal ALB, no public DNS record.
 # Reachable only from the corporate network via Client VPN (see infra/terraform/modules/vpn).
-# The AWS Load Balancer Controller provisions a separate ALB because alb.ingress.kubernetes.io/group.name
-# is not set the same as the public ingress.
+#
+# HTTPS-only because the admin UI uses window.crypto.subtle (PKCE for Cognito
+# OAuth), which the browser disables on plain HTTP origins. HTTP requests are
+# redirected to HTTPS via the ssl-redirect action below.
+#
+# Certificate is imported into ACM, signed by the same easy-rsa CA used for
+# the Client VPN. The browser will throw a cert-not-trusted warning the first
+# time you visit; click through (Advanced -> Proceed). For real prod, swap
+# this for a public ACM cert tied to a custom internal domain.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -10,7 +17,9 @@ metadata:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internal
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-west-1:621721788004:certificate/21d14406-f33c-4546-8837-76615eeae928
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
     alb.ingress.kubernetes.io/healthcheck-path: /health
 spec:
   rules:

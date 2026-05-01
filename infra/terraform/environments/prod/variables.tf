@@ -21,10 +21,41 @@ variable "ses_sender" {
   default     = "invoices@shopcloud.local"
 }
 
-variable "public_alb_dns_name" {
-  description = "DNS name of the public ALB (CloudFront origin). Populated after the AWS Load Balancer Controller creates the ingress ALB; supply via -var on the second apply."
-  type        = string
-  default     = ""
+variable "public_alb_dns_names" {
+  description = <<-EOT
+    Public ALB DNS names per environment. One CloudFront distribution + S3
+    storefront bucket is provisioned per non-empty entry. Get the values from
+    `kubectl -n <env> get ingress shopcloud -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'`
+    after the AWS Load Balancer Controller has provisioned the per-namespace
+    Ingress ALBs.
+
+    Example:
+      public_alb_dns_names = {
+        prod = "k8s-prod-shopclou-xxx.eu-west-1.elb.amazonaws.com"
+        dev  = "k8s-dev-shopclou-yyy.eu-west-1.elb.amazonaws.com"
+      }
+  EOT
+  type        = map(string)
+  default     = {}
+}
+
+variable "frontend_origin_enabled" {
+  description = <<-EOT
+    Per-environment flag controlling whether CloudFront wires the S3 storefront
+    bucket as an origin. Required because of a Terraform planner limitation:
+    `module.edge` and `module.s3_frontend` reference each other through count
+    guards, so a `try()` chain on the bucket domain cannot be resolved at plan
+    time.
+
+    Two-pass apply for an env:
+      PASS 1: frontend_origin_enabled = { prod = false }  (creates CloudFront + bucket)
+      PASS 2: frontend_origin_enabled = { prod = true  }  (adds bucket as origin)
+
+    Defaults to false for safety; flip to true only after pass 1 has applied
+    successfully for that env.
+  EOT
+  type        = map(bool)
+  default     = {}
 }
 
 variable "hosted_zone_id" {

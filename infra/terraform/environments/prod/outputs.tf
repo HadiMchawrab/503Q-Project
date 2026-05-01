@@ -94,21 +94,23 @@ output "cognito_admin_hosted_ui_domain" {
   value = module.cognito.admin_hosted_ui_domain
 }
 
-# Edge
-output "cloudfront_domain_name" {
-  description = "CNAME this from your DNS provider if hosted_zone_id is empty."
-  value       = try(module.edge[0].cloudfront_domain_name, "")
+# Edge -- maps keyed by env. The deploy.yml "Read terraform outputs" step
+# picks out the entry matching the resolved environment.
+output "cloudfront_domain_names" {
+  description = "Map of env -> CloudFront domain (e.g. d1234.cloudfront.net). CNAME from your DNS provider if hosted_zone_id is empty."
+  value       = { for env, edge in module.edge : env => edge.cloudfront_domain_name }
 }
 
-output "cloudfront_distribution_id" {
-  description = "Pass to `aws cloudfront create-invalidation` after pushing new static assets."
-  value       = try(module.edge[0].cloudfront_distribution_id, "")
+output "cloudfront_distribution_ids" {
+  description = "Map of env -> CloudFront distribution ID. Pass to `aws cloudfront create-invalidation`."
+  value       = { for env, edge in module.edge : env => edge.cloudfront_distribution_id }
 }
 
-# Storefront
-output "frontend_bucket_name" {
-  description = "S3 bucket holding storefront static assets. CI runs `aws s3 sync frontend/ s3://<this>`."
-  value       = try(module.s3_frontend[0].bucket_name, "")
+# Storefront -- map of env -> bucket name. Each env has its own bucket so
+# they can be deployed independently with potentially different versions.
+output "frontend_bucket_names" {
+  description = "Map of env -> S3 bucket name holding storefront assets. CI runs `aws s3 sync frontend/ s3://<this>`."
+  value       = { for env, bucket in module.s3_frontend : env => bucket.bucket_name }
 }
 
 # DR
