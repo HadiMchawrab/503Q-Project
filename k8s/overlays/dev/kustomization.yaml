@@ -28,8 +28,8 @@ configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
-      - INVOICE_QUEUE_URL=
-      - CART_KEY_PREFIX=cart:dev:
+      - "INVOICE_QUEUE_URL="
+      - "CART_KEY_PREFIX=cart:dev:"
 
 # DATABASE_URL points dev pods at the shopcloud_dev database on the shared RDS.
 # CI runs: kustomize edit add secret shopcloud-secrets --from-literal=DATABASE_URL=$URL

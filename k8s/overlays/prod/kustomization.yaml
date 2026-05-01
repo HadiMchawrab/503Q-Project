@@ -32,8 +32,8 @@ configMapGenerator:
   - name: shopcloud-config
     behavior: merge
     literals:
-      - INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT
-      - CART_KEY_PREFIX=cart:prod:
+      - "INVOICE_QUEUE_URL=REPLACE_WITH_TERRAFORM_OUTPUT"
+      - "CART_KEY_PREFIX=cart:prod:"
       # invoice-worker reads these (mirror of the Lambda env). Filled in by CI:
       #   kustomize edit add configmap shopcloud-config \
       #     --from-literal=INVOICES_BUCKET=$(terraform output -raw invoice_bucket_name) \
