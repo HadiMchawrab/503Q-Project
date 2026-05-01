@@ -10,6 +10,20 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const money = (cents) => `$${(Number(cents || 0) / 100).toFixed(2)}`;
 const shortId = (id) => (id ? `${id.slice(0, 8)}...` : '-');
+const PRODUCT_PHOTOS = {
+  '/assets/products/cloudbook-pro.svg': 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8',
+  '/assets/products/cloudbook-air.svg': 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853',
+  '/assets/products/nimbus-phone-x.svg': 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9',
+  '/assets/products/nimbus-phone-mini.svg': 'https://images.unsplash.com/photo-1598327105666-5b89351aff97',
+  '/assets/products/securekey.svg': 'https://images.unsplash.com/photo-1563986768609-322da13575f3',
+  '/assets/products/dock-station.svg': 'https://images.unsplash.com/photo-1625948515291-69613efd103f',
+  '/assets/products/echopods.svg': 'https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1',
+  '/assets/products/headphones.svg': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e',
+  '/assets/products/monitor-27.svg': 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf',
+  '/assets/products/monitor-34.svg': 'https://images.unsplash.com/photo-1547082299-de196ea013d6',
+  '/assets/products/backpack.svg': 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62',
+  '/assets/products/mesh-wifi.svg': 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8'
+};
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -129,7 +143,8 @@ function productInitials(product) {
 }
 
 function safeImageUrl(url) {
-  const value = String(url || '').trim();
+  const rawValue = String(url || '').trim();
+  const value = PRODUCT_PHOTOS[rawValue] || rawValue;
   if (!value) return '';
   if (value.includes('images.unsplash.com') && !value.includes('?')) {
     return `${value}?auto=format&fit=crop&w=900&q=80`;

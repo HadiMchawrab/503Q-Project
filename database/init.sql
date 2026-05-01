@@ -58,18 +58,18 @@ CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 
 INSERT INTO products (sku, name, description, category, price_cents, image_url, stock)
 VALUES
-('LAP-001', 'CloudBook Pro 14', 'Lightweight laptop for students, developers, and cloud engineers.', 'Laptops', 129900, '/assets/products/cloudbook-pro.svg', 15),
-('LAP-002', 'CloudBook Air 13', 'Portable everyday laptop with long battery life and fast startup.', 'Laptops', 99900, '/assets/products/cloudbook-air.svg', 12),
-('PHN-001', 'Nimbus Phone X', 'Fast smartphone with strong battery life and secure authentication.', 'Phones', 89900, '/assets/products/nimbus-phone-x.svg', 25),
-('PHN-002', 'Nimbus Phone Mini', 'Compact smartphone for travel, work, and everyday communication.', 'Phones', 59900, '/assets/products/nimbus-phone-mini.svg', 3),
-('ACC-001', 'SecureKey USB-C', 'Hardware security key for modern authentication flows.', 'Accessories', 4900, '/assets/products/securekey.svg', 100),
-('ACC-002', 'USB-C Dock Station', 'Multi-port dock with HDMI, Ethernet, and fast charging support.', 'Accessories', 11900, '/assets/products/dock-station.svg', 8),
-('AUD-001', 'EchoPods Wireless', 'Wireless earbuds for calls, music, and travel.', 'Audio', 14900, '/assets/products/echopods.svg', 40),
-('AUD-002', 'FocusMax Headphones', 'Noise-cancelling headphones for deep work and long flights.', 'Audio', 24900, '/assets/products/headphones.svg', 6),
-('MON-001', 'UltraView 27 Monitor', '27-inch high resolution display for productivity and gaming.', 'Monitors', 32900, '/assets/products/monitor-27.svg', 20),
-('MON-002', 'UltraView 34 Curved', 'Wide curved monitor for dashboards, coding, and creative work.', 'Monitors', 52900, '/assets/products/monitor-34.svg', 4),
-('BAG-001', 'TravelTech Backpack', 'Water-resistant backpack with laptop compartment and cable organizer.', 'Accessories', 7900, '/assets/products/backpack.svg', 50),
-('NET-001', 'Mesh Wi-Fi Duo', 'Two-node mesh Wi-Fi kit for reliable home and office coverage.', 'Networking', 19900, '/assets/products/mesh-wifi.svg', 9)
+('LAP-001', 'CloudBook Pro 14', 'Lightweight laptop for students, developers, and cloud engineers.', 'Laptops', 129900, 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8', 15),
+('LAP-002', 'CloudBook Air 13', 'Portable everyday laptop with long battery life and fast startup.', 'Laptops', 99900, 'https://images.unsplash.com/photo-1496181133206-80ce9b88a853', 12),
+('PHN-001', 'Nimbus Phone X', 'Fast smartphone with strong battery life and secure authentication.', 'Phones', 89900, 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9', 25),
+('PHN-002', 'Nimbus Phone Mini', 'Compact smartphone for travel, work, and everyday communication.', 'Phones', 59900, 'https://images.unsplash.com/photo-1598327105666-5b89351aff97', 3),
+('ACC-001', 'SecureKey USB-C', 'Hardware security key for modern authentication flows.', 'Accessories', 4900, 'https://images.unsplash.com/photo-1563986768609-322da13575f3', 100),
+('ACC-002', 'USB-C Dock Station', 'Multi-port dock with HDMI, Ethernet, and fast charging support.', 'Accessories', 11900, 'https://images.unsplash.com/photo-1625948515291-69613efd103f', 8),
+('AUD-001', 'EchoPods Wireless', 'Wireless earbuds for calls, music, and travel.', 'Audio', 14900, 'https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1', 40),
+('AUD-002', 'FocusMax Headphones', 'Noise-cancelling headphones for deep work and long flights.', 'Audio', 24900, 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e', 6),
+('MON-001', 'UltraView 27 Monitor', '27-inch high resolution display for productivity and gaming.', 'Monitors', 32900, 'https://images.unsplash.com/photo-1527443224154-c4a3942d3acf', 20),
+('MON-002', 'UltraView 34 Curved', 'Wide curved monitor for dashboards, coding, and creative work.', 'Monitors', 52900, 'https://images.unsplash.com/photo-1547082299-de196ea013d6', 4),
+('BAG-001', 'TravelTech Backpack', 'Water-resistant backpack with laptop compartment and cable organizer.', 'Accessories', 7900, 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62', 50),
+('NET-001', 'Mesh Wi-Fi Duo', 'Two-node mesh Wi-Fi kit for reliable home and office coverage.', 'Networking', 19900, 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8', 9)
 ON CONFLICT (sku) DO UPDATE SET
   name = EXCLUDED.name,
   description = EXCLUDED.description,
