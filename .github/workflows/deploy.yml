@@ -234,7 +234,14 @@ jobs:
           set -euo pipefail
           terraform init -input=false -backend=true >/dev/null
 
-          out() { terraform output -raw "$1" 2>/dev/null || echo ""; }
+          # `terraform output` failures must surface, not get swallowed into the
+          # variable. An earlier version of this script used `|| echo ""` and a
+          # missing output silently fed the GH Actions error annotation string
+          # ("::error::Terraform exited with code 1.") into FRONTEND_BUCKET,
+          # which then crashed `aws s3 sync` with a confusing "invalid bucket
+          # name" further down the workflow. Hard-fail here instead.
+          out() { terraform output -raw "$1"; }
+          out_map_key() { terraform output -json "$1" | jq -r --arg k "$2" '.[$k] // ""'; }
           ENV="${{ needs.resolve.outputs.environment }}"
 
           # DATABASE_URL is per-environment — both prod and dev share the same
@@ -244,6 +251,11 @@ jobs:
           else
             DB_URL=$(out rds_url_dev)
           fi
+
+          # Edge + storefront outputs are env-keyed maps now (one CloudFront +
+          # one S3 bucket per env). Pick the entry matching $ENV.
+          FRONTEND_BUCKET=$(out_map_key frontend_bucket_names "$ENV")
+          CLOUDFRONT_DISTRIBUTION_ID=$(out_map_key cloudfront_distribution_ids "$ENV")
 
           {
             echo "INVOICE_QUEUE_URL=$(out invoice_queue_url)"
@@ -260,8 +272,8 @@ jobs:
             echo "DB_SECRET_ARN=$(out db_secret_arn)"
             # ElastiCache primary endpoint, used to build REDIS_URL for both envs.
             echo "REDIS_HOST=$(out redis_endpoint)"
-            echo "FRONTEND_BUCKET=$(out frontend_bucket_name)"
-            echo "CLOUDFRONT_DISTRIBUTION_ID=$(out cloudfront_distribution_id)"
+            echo "FRONTEND_BUCKET=$FRONTEND_BUCKET"
+            echo "CLOUDFRONT_DISTRIBUTION_ID=$CLOUDFRONT_DISTRIBUTION_ID"
             # GitHub masks this in logs because it's marked sensitive.
             echo "DATABASE_URL=$DB_URL"
           } >> "$GITHUB_OUTPUT"
