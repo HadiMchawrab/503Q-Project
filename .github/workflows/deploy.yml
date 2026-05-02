@@ -267,6 +267,9 @@ jobs:
             echo "COGNITO_ADMIN_DOMAIN=$(out cognito_admin_hosted_ui_domain)"
             echo "CHECKOUT_IRSA_ROLE_ARN=$(out checkout_irsa_role_arn)"
             echo "INVOICE_WORKER_IRSA_ROLE_ARN=$(out invoice_worker_irsa_role_arn)"
+            echo "ADMIN_IRSA_ROLE_ARN=$(out admin_irsa_role_arn)"
+            echo "PRODUCT_IMAGES_BUCKET=$(out product_images_bucket_name)"
+            echo "PRODUCT_IMAGES_PUBLIC_BASE=$(out product_images_cloudfront_domain)"
             echo "INVOICES_BUCKET=$(out invoice_bucket_name)"
             echo "DB_HOST=$(out rds_endpoint)"
             echo "DB_SECRET_ARN=$(out db_secret_arn)"
@@ -331,6 +334,10 @@ jobs:
           else
             INVOICE_QUEUE_URL_VAL=''
           fi
+          # PRODUCT_IMAGES_BUCKET + PRODUCT_IMAGES_PUBLIC_BASE feed the admin
+          # pod's POST /products/upload endpoint. Same bucket + same CloudFront
+          # domain across both envs (one shared bucket -- product images are
+          # content, not env-specific data).
           kustomize edit add configmap shopcloud-config \
             --behavior=merge \
             --from-literal=INVOICE_QUEUE_URL="$INVOICE_QUEUE_URL_VAL" \
@@ -339,7 +346,9 @@ jobs:
             --from-literal=COGNITO_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_CLIENT_ID }}' \
             --from-literal=COGNITO_ADMIN_CLIENT_ID='${{ steps.tf_out.outputs.COGNITO_ADMIN_CLIENT_ID }}' \
             --from-literal=COGNITO_CUSTOMER_DOMAIN='${{ steps.tf_out.outputs.COGNITO_CUSTOMER_DOMAIN }}' \
-            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}'
+            --from-literal=COGNITO_ADMIN_DOMAIN='${{ steps.tf_out.outputs.COGNITO_ADMIN_DOMAIN }}' \
+            --from-literal=PRODUCT_IMAGES_BUCKET='${{ steps.tf_out.outputs.PRODUCT_IMAGES_BUCKET }}' \
+            --from-literal=PRODUCT_IMAGES_PUBLIC_BASE='${{ steps.tf_out.outputs.PRODUCT_IMAGES_PUBLIC_BASE }}'
 
           # 2b) Per-env DATABASE_URL — picks shopcloud_prod or shopcloud_dev on
           #     the shared RDS instance based on the resolved environment.
@@ -380,6 +389,11 @@ jobs:
             sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-invoice-worker|${{ steps.tf_out.outputs.INVOICE_WORKER_IRSA_ROLE_ARN }}|g" \
               invoice-worker-sa-patch.yaml
           fi
+
+          # 3c) Same for admin (both envs -- the IAM role's trust policy
+          #     covers both prod and dev:admin service accounts).
+          sed -i "s|arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-admin|${{ steps.tf_out.outputs.ADMIN_IRSA_ROLE_ARN }}|g" \
+            admin-sa-patch.yaml
 
       - name: Diff (informational)
         working-directory: k8s/overlays/${{ needs.resolve.outputs.environment }}

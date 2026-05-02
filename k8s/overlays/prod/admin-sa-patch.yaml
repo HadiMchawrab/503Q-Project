@@ -1,0 +1,10 @@
+# IRSA annotation on the admin service account.
+# CI replaces the placeholder with `terraform output -raw admin_irsa_role_arn`
+# (see deploy.yml). Without this annotation, the admin pod can't write to the
+# product images S3 bucket and POST /products/upload returns 502.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-admin

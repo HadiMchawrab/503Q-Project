@@ -58,5 +58,9 @@ patches:
     target:
       kind: ServiceAccount
       name: invoice-worker
+  - path: admin-sa-patch.yaml
+    target:
+      kind: ServiceAccount
+      name: admin
 
 # Production keeps the base default of 2 replicas per HTTP service.

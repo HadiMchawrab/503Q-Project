@@ -99,7 +99,7 @@ resource "aws_eks_node_group" "this" {
   capacity_type  = "ON_DEMAND"
 
   scaling_config {
-    desired_size = 3 # one node per AZ to start
+    desired_size = 3 # initial size; the cluster autoscaler owns this at runtime
     min_size     = 3
     max_size     = 6
   }
@@ -114,6 +114,15 @@ resource "aws_eks_node_group" "this" {
   tags = {
     "k8s.io/cluster-autoscaler/enabled"         = "true"
     "k8s.io/cluster-autoscaler/${var.name}"     = "owned"
+  }
+
+  # `desired_size` is owned by the cluster autoscaler at runtime: it raises and
+  # lowers the count based on pending-pod pressure. Without ignore_changes,
+  # every `terraform apply` would drag desired_size back to the literal above
+  # and fight the autoscaler. min/max are still enforced (autoscaler respects
+  # them), so terraform retains control over the bounds.
+  lifecycle {
+    ignore_changes = [scaling_config[0].desired_size]
   }
 
   depends_on = [

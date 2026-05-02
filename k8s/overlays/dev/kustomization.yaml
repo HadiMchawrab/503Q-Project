@@ -53,6 +53,10 @@ patches:
     target:
       kind: ServiceAccount
       name: checkout
+  - path: admin-sa-patch.yaml
+    target:
+      kind: ServiceAccount
+      name: admin
 
 # Cheaper footprint in dev — single replica per service.
 replicas:
