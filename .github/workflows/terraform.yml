@@ -93,7 +93,14 @@ jobs:
             });
 
   apply:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # DISABLED for auto-runs: only fires on manual workflow_dispatch.
+    # An earlier auto-apply on push-to-main destroyed CloudFront + Client VPN
+    # because the CI runner's state refresh saw drift from local applies and
+    # "corrected" by recreating live resources. Until state ownership is
+    # consolidated (CI-only OR local-only, not both), apply must be triggered
+    # explicitly. Re-enable by changing the condition to:
+    #   github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     # `prod` environment in repo settings should require manual approval.
     environment: prod
