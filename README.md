@@ -1,33 +1,39 @@
 # ShopCloud
 
-Small e-commerce platform running on AWS. Five backend services plus a separate admin console endpoint behind an EKS cluster, Postgres + Redis for data, and an async pipeline that emails invoice PDFs after checkout.
+ShopCloud is a cloud-native e-commerce platform designed around service isolation, managed AWS infrastructure, and automated delivery. The system separates customer traffic, administrative access, transactional data, cache/session state, and asynchronous invoice processing into independently deployable components that can be operated across development and production environments.
+
+At runtime, the platform combines five FastAPI backend services, a customer storefront, an internal admin console, PostgreSQL for durable transactional data, Redis for low-latency cart/session state, and an event-driven invoice workflow built around SQS, PDF generation, S3 storage, and SES delivery.
 
 ## Stack
 
-- **Backend:** FastAPI (Python 3.11)
-- **Frontend:** React (TypeScript)
-- **Database:** PostgreSQL (RDS, Multi-AZ)
-- **Cache / sessions:** Redis (ElastiCache)
-- **Auth:** Cognito (separate customer + admin pools, JWT)
-- **Async:** SQS + Lambda (PDF rendering) + S3 + SES
-- **Infra:** Terraform
-- **Runtime:** EKS, Kustomize
+- **Backend:** FastAPI microservices on Python 3.11
+- **Frontend:** React / Vite storefront, served as static assets
+- **Database:** PostgreSQL on Amazon RDS for orders, users, products, and inventory
+- **Cache / sessions:** Redis / ElastiCache for cart persistence and fast session lookups
+- **Auth:** Amazon Cognito with separate customer and administrator identity boundaries
+- **Async processing:** SQS-driven invoice workflow with PDF rendering, S3 storage, and SES email delivery
+- **Infrastructure:** Terraform modules for networking, compute, data, identity, messaging, and edge delivery
+- **Runtime:** Amazon EKS with Kubernetes Deployments, Services, Ingress, HPA, and Kustomize overlays
 - **CI/CD:** GitHub Actions → ECR → EKS
 
 ## Services
 
-| Service   | What it does                                  |
+| Service   | Responsibility                                |
 |-----------|-----------------------------------------------|
-| catalog   | Product listings, search                      |
-| cart      | Cart state (Redis-backed)                     |
-| checkout  | Orders, payment, emits invoice events to SQS  |
-| auth      | Token exchange, JWT validation against Cognito|
-| admin     | Internal-only admin API                       |
-| admin-ui  | Internal-only admin console frontend          |
+| catalog   | Public product discovery, category filtering, search, and inventory visibility |
+| cart      | Authenticated cart state backed by Redis and validated against live catalog data |
+| checkout  | Transactional order creation, stock validation, inventory decrementing, and invoice event publishing |
+| auth      | Authentication configuration, local-development auth, Cognito JWT verification, and user profile mirroring |
+| admin     | Internal inventory, order, and operational management API protected by admin-only authorization |
+| admin-ui  | Restricted administrative console served separately from the public storefront |
 
-Each service is a FastAPI app, one container per pod, 2 replicas minimum, spread across AZs.
+Each backend service is packaged into the shared `shopcloud-app` container image and selected at runtime through a service-specific Uvicorn entrypoint. In Kubernetes, the services run as independent Deployments with their own Services, probes, resource limits, and autoscaling policies.
 
 ## Traffic paths
+
+The public and administrative paths are intentionally separated. Customer traffic enters through the edge layer and reaches only the public API surface, while administrative workflows are routed through a private ingress path intended for VPN-connected staff. This keeps inventory and order-management operations isolated from the customer-facing storefront even though both paths ultimately target workloads running inside the same EKS platform.
+
+The application tier follows a service-per-responsibility model: catalog handles product discovery, cart owns temporary user state, checkout owns transactional order creation, auth centralizes token validation, and admin exposes privileged operational workflows. Shared modules provide common database access, authentication helpers, Redis cart persistence, queue publishing, error handling, and service bootstrapping.
 
 - **Customers:** Route 53 → CloudFront → WAF → public ALB → EKS ingress
 - **Admins:** Client VPN (cert + MFA) → internal ALB (no public DNS) → admin service
@@ -60,7 +66,7 @@ Each service is a FastAPI app, one container per pod, 2 replicas minimum, spread
 Copy `.env.example` to `.env` at the repo root, then bring the whole stack up with:
 
 ```
-docker compose -f docker-compose.dev.yml up
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 This builds and starts Postgres, Redis, all five backend services, the customer storefront, the admin console, and an NGINX gateway that fronts them.
