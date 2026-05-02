@@ -270,19 +270,42 @@ async def update_order_status(order_id: str, payload: dict[str, Any] = Body(...)
     if status not in ORDER_STATUSES:
         raise AppError(400, "INVALID_STATUS", f"Status must be one of: {', '.join(sorted(ORDER_STATUSES))}")
 
-    order = await db.fetchrow(
-        """
-        UPDATE orders
-        SET status = $1
-        WHERE id = $2
-        RETURNING id, status, total_cents, invoice_status, created_at
-        """,
-        status,
-        parse_uuid(order_id, "order id"),
-    )
-    if not order:
-        raise AppError(404, "ORDER_NOT_FOUND", "Order not found")
-    return success({"order": order})
+    order_uuid = parse_uuid(order_id, "order id")
+
+    async with db.transaction() as conn:
+        current = await conn.fetchrow(
+            "SELECT id, status FROM orders WHERE id = $1",
+            order_uuid,
+        )
+        if not current:
+            raise AppError(404, "ORDER_NOT_FOUND", "Order not found")
+
+        # Restore stock when cancelling a non-cancelled order.
+        if status == "cancelled" and current["status"] != "cancelled":
+            await conn.execute(
+                """
+                UPDATE products p
+                SET stock = p.stock + oi.quantity,
+                    updated_at = NOW()
+                FROM order_items oi
+                WHERE oi.order_id = $1
+                  AND p.id = oi.product_id
+                """,
+                order_uuid,
+            )
+
+        order = await conn.fetchrow(
+            """
+            UPDATE orders
+            SET status = $1
+            WHERE id = $2
+            RETURNING id, status, total_cents, invoice_status, created_at
+            """,
+            status,
+            order_uuid,
+        )
+
+    return success({"order": dict(order)})
 
 
 @router.post("/products/upload", status_code=201)
