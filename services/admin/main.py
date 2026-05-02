@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import APIRouter, Body, Depends, File, Query, UploadFile
 
 from shared import db
 from shared.auth import require_role
@@ -14,6 +20,32 @@ from shared.service import create_app
 
 
 ORDER_STATUSES = {"confirmed", "processing", "shipped", "cancelled"}
+
+logger = logging.getLogger(__name__)
+
+# Product image upload config. PRODUCT_IMAGES_BUCKET + PRODUCT_IMAGES_PUBLIC_BASE
+# come from terraform via the prod overlay's ConfigMap; both are required for
+# uploads to work. The endpoint returns 503 instead of 500 if they're missing
+# (e.g. dev overlay before terraform apply has wired them up).
+PRODUCT_IMAGES_BUCKET = os.getenv("PRODUCT_IMAGES_BUCKET", "")
+PRODUCT_IMAGES_PUBLIC_BASE = os.getenv("PRODUCT_IMAGES_PUBLIC_BASE", "")
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MB
+EXT_BY_CONTENT_TYPE = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/gif": "gif",
+}
+
+_s3_client = None
+
+
+def s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "eu-west-1"))
+    return _s3_client
 
 
 @asynccontextmanager
@@ -251,6 +283,68 @@ async def update_order_status(order_id: str, payload: dict[str, Any] = Body(...)
     if not order:
         raise AppError(404, "ORDER_NOT_FOUND", "Order not found")
     return success({"order": order})
+
+
+@router.post("/products/upload", status_code=201)
+async def upload_product_image(file: UploadFile = File(...)):
+    """Receive a product image and store it in the product images bucket.
+
+    Returns the public CloudFront URL the admin form can stuff into
+    `imageUrl` when creating/updating the product. Object keys are random
+    UUIDs so two uploads of `phone.jpg` from different sessions don't
+    collide -- the original filename is irrelevant to the public URL.
+    """
+    if not PRODUCT_IMAGES_BUCKET or not PRODUCT_IMAGES_PUBLIC_BASE:
+        raise AppError(
+            503,
+            "UPLOADS_DISABLED",
+            "Product image uploads are not configured for this environment",
+        )
+
+    content_type = (file.content_type or "").lower()
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise AppError(
+            400,
+            "UNSUPPORTED_IMAGE_TYPE",
+            f"Allowed types: {', '.join(sorted(ALLOWED_IMAGE_TYPES))}",
+        )
+
+    body = await file.read()
+    if len(body) == 0:
+        raise AppError(400, "EMPTY_UPLOAD", "Uploaded file is empty")
+    if len(body) > MAX_IMAGE_BYTES:
+        raise AppError(
+            400,
+            "FILE_TOO_LARGE",
+            f"Max size is {MAX_IMAGE_BYTES // (1024 * 1024)} MB",
+        )
+
+    ext = EXT_BY_CONTENT_TYPE[content_type]
+    key = f"products/{uuid.uuid4().hex}.{ext}"
+
+    # boto3 is sync; offload to a thread so the event loop stays responsive
+    # while the upload streams to S3.
+    def _put():
+        s3_client().put_object(
+            Bucket=PRODUCT_IMAGES_BUCKET,
+            Key=key,
+            Body=body,
+            ContentType=content_type,
+            CacheControl="public, max-age=31536000, immutable",
+        )
+
+    try:
+        await asyncio.to_thread(_put)
+    except (BotoCoreError, ClientError):
+        logger.exception("S3 PutObject failed for key=%s", key)
+        raise AppError(502, "STORAGE_UNAVAILABLE", "Could not store the image")
+
+    return success({
+        "image_url": f"https://{PRODUCT_IMAGES_PUBLIC_BASE}/{key}",
+        "key": key,
+        "content_type": content_type,
+        "size_bytes": len(body),
+    })
 
 
 app.include_router(router)

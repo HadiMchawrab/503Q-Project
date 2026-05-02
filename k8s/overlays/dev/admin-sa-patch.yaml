@@ -1,0 +1,10 @@
+# IRSA annotation on the admin service account.
+# CI replaces the placeholder with `terraform output -raw admin_irsa_role_arn`
+# (see deploy.yml). The role's trust policy permits both prod and dev
+# namespaces to assume it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::REPLACE_ACCOUNT_ID:role/shopcloud-admin

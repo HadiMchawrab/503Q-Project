@@ -1,3 +1,10 @@
+# Named ServiceAccount so the prod/dev overlays can annotate it with an
+# IRSA role ARN. The role lets the admin pod write product images to S3.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,6 +18,7 @@ spec:
     metadata:
       labels: { app: admin }
     spec:
+      serviceAccountName: admin
       containers:
         - name: admin
           image: shopcloud-app:latest
