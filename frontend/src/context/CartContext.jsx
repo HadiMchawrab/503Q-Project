@@ -1,10 +1,14 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { api, money } from '../api'
+import { useAuth } from './AuthContext'
 
 const CartContext = createContext(null)
 
+const EMPTY_CART = { items: [], total_cents: 0, item_count: 0 }
+
 export function CartProvider({ children }) {
-  const [cart, setCart] = useState({ items: [], total_cents: 0, item_count: 0 })
+  const { user, loading: authLoading } = useAuth()
+  const [cart, setCart] = useState(EMPTY_CART)
   const [isOpen, setIsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -12,11 +16,29 @@ export function CartProvider({ children }) {
   const fetchCart = useCallback(async () => {
     try {
       const data = await api.getCart()
-      setCart(data.cart || { items: [], total_cents: 0, item_count: 0 })
+      setCart(data.cart || EMPTY_CART)
     } catch {
       // Not authenticated or backend unavailable — keep empty cart
     }
   }, [])
+
+  // Hydrate the cart from Redis whenever the signed-in user changes.
+  // Cart is keyed server-side by Cognito sub, so:
+  //   - on first mount, if a token already exists in localStorage, fetch
+  //   - after sign-in completes, fetch
+  //   - after sign-out (user goes null), reset to empty so the UI doesn't
+  //     show the previous user's cart for a flash
+  // Without this effect, cart state stays at the initial empty value until
+  // the user adds an item — which is why the cart appeared empty on refresh
+  // even though Redis had the items.
+  useEffect(() => {
+    if (authLoading) return
+    if (user) {
+      fetchCart()
+    } else {
+      setCart(EMPTY_CART)
+    }
+  }, [user, authLoading, fetchCart])
 
   const addItem = useCallback(async (productId) => {
     setBusy(true)
