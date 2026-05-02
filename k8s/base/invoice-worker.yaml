@@ -16,14 +16,24 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: invoice-worker
-  labels: { app: invoice-worker }
+  labels:
+    app: invoice-worker
+    app.kubernetes.io/name: invoice-worker
+    app.kubernetes.io/component: async-worker
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    shopcloud.io/owner: platform-team
 spec:
   replicas: 0
   selector:
     matchLabels: { app: invoice-worker }
   template:
     metadata:
-      labels: { app: invoice-worker }
+      labels:
+        app: invoice-worker
+        app.kubernetes.io/name: invoice-worker
+        app.kubernetes.io/component: async-worker
+        app.kubernetes.io/managed-by: kustomize
     spec:
       # Defined in keda-invoice-scaler.yaml — IRSA-annotated by the overlay.
       serviceAccountName: invoice-worker

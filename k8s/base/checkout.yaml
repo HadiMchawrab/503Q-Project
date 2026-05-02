@@ -5,19 +5,36 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: checkout
+  labels:
+    app: checkout
+    app.kubernetes.io/name: checkout
+    app.kubernetes.io/component: checkout
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    shopcloud.io/owner: platform-team
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: checkout
-  labels: { app: checkout }
+  labels:
+    app: checkout
+    app.kubernetes.io/name: checkout
+    app.kubernetes.io/component: checkout
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    shopcloud.io/owner: platform-team
 spec:
   replicas: 2
   selector:
     matchLabels: { app: checkout }
   template:
     metadata:
-      labels: { app: checkout }
+      labels:
+        app: checkout
+        app.kubernetes.io/name: checkout
+        app.kubernetes.io/component: checkout
+        app.kubernetes.io/managed-by: kustomize
     spec:
       serviceAccountName: checkout
       containers:
@@ -50,6 +67,13 @@ apiVersion: v1
 kind: Service
 metadata:
   name: checkout
+  labels:
+    app: checkout
+    app.kubernetes.io/name: checkout
+    app.kubernetes.io/component: checkout
+    app.kubernetes.io/managed-by: kustomize
+  annotations:
+    shopcloud.io/owner: platform-team
 spec:
   selector: { app: checkout }
   ports:
