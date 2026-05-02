@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
 
 export default function Header({ onSearch }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, logout } = useAuth()
   const { count, setIsOpen } = useCart()
 
@@ -25,7 +26,15 @@ export default function Header({ onSearch }) {
   const handleSearch = useCallback((e) => {
     e.preventDefault()
     onSearch?.(query.trim())
-  }, [query, onSearch])
+    if (location.pathname !== '/') navigate('/')
+  }, [query, onSearch, navigate, location.pathname])
+
+  const handleQueryChange = useCallback((e) => {
+    const value = e.target.value
+    setQuery(value)
+    onSearch?.(value.trim())
+    if (location.pathname !== '/') navigate('/')
+  }, [onSearch, navigate, location.pathname])
 
   const firstName = user?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'Guest'
 
@@ -44,7 +53,7 @@ export default function Header({ onSearch }) {
           className="hdr-search-input"
           placeholder="Search products, categories, brands..."
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={handleQueryChange}
         />
         <button type="submit" className="hdr-search-btn" aria-label="Search">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">

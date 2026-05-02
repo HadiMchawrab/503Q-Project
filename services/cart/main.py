@@ -7,6 +7,7 @@ import httpx
 from fastapi import Depends
 from pydantic import BaseModel, Field
 
+from shared import db
 from shared.auth import current_user
 from shared.cart_store import clear_cart, get_cart, save_cart
 from shared.config import settings
@@ -26,9 +27,14 @@ class CartQuantityRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_):
+    # Cart needs Postgres for the user-mirror upsert that runs on every
+    # authenticated request (shared.auth.upsert_user_from_claims), in addition
+    # to Redis for cart storage itself.
+    await db.init_db()
     await init_redis()
     yield
     await close_redis()
+    await db.close_db()
 
 
 app = create_app("cart", lifespan=lifespan)

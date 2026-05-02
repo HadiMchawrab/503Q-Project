@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
 import { api, money, resolveImage } from '../api'
@@ -6,6 +7,13 @@ import { api, money, resolveImage } from '../api'
 export default function CartDrawer() {
   const { items, count, totalCents, totalDisplay, isOpen, setIsOpen, updateItem, removeItem, clearCart, fetchCart } = useCart()
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const handleContinueShopping = () => {
+    setIsOpen(false)
+    if (location.pathname !== '/') navigate('/')
+  }
 
   const [view, setView] = useState('cart') // 'cart' | 'checkout'
   const [address, setAddress] = useState('Beirut Digital District, Beirut, Lebanon')
@@ -122,7 +130,7 @@ export default function CartDrawer() {
                 <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
               </svg>
               <p>Your cart is empty</p>
-              <button className="cart-continue-btn" onClick={() => setIsOpen(false)}>
+              <button className="cart-continue-btn" onClick={handleContinueShopping}>
                 Continue Shopping
               </button>
             </div>
