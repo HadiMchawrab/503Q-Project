@@ -177,8 +177,13 @@ module "lambda_invoice" {
   ses_sender    = var.ses_sender
   db_secret_arn = aws_secretsmanager_secret.db_password.arn
   db_host       = module.data.rds_endpoint
-  db_name       = module.data.rds_db_name
-  db_user       = "shopcloud"
+  # The Lambda only consumes events published by prod checkout (dev never
+  # publishes -- INVOICE_QUEUE_URL is empty in dev's overlay). Point it at
+  # the prod-namespaced database where orders actually land. The master
+  # `shopcloud` DB that data module exports has no schema -- using it here
+  # caused 'relation "orders" does not exist' DLQ failures.
+  db_name = "shopcloud_prod"
+  db_user = "shopcloud"
 }
 
 # ----------------------------------------------------------------------------
