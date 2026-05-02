@@ -139,3 +139,21 @@ output "alb_controller_role_arn" {
   description = "Annotate the aws-load-balancer-controller K8s service account with this role ARN."
   value       = module.irsa_alb_controller.role_arn
 }
+
+# Product images -- shared bucket + CloudFront for image uploads from the
+# admin console. Admin pod's IRSA role writes here; storefront renders
+# `https://<cf-domain>/<key>` for any uploaded image.
+output "admin_irsa_role_arn" {
+  description = "Annotate the admin K8s service account with this role ARN so the pod can s3:PutObject to the product images bucket."
+  value       = module.irsa_admin.role_arn
+}
+
+output "product_images_bucket_name" {
+  description = "S3 bucket name for admin product image uploads. Wired into admin pod env as PRODUCT_IMAGES_BUCKET."
+  value       = module.s3_product_images.bucket_name
+}
+
+output "product_images_cloudfront_domain" {
+  description = "CloudFront domain serving uploaded product images. Wired into admin pod env as PRODUCT_IMAGES_PUBLIC_BASE so the upload endpoint can return absolute URLs."
+  value       = module.s3_product_images.cloudfront_domain_name
+}

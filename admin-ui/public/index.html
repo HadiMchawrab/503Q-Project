@@ -102,9 +102,15 @@
               <label class="field-label" for="stock">Opening stock</label>
               <input id="stock" placeholder="25" type="number" min="0" />
             </div>
-            <div>
-              <label class="field-label" for="imageUrl">Image URL <span class="muted">optional, fallback included</span></label>
+            <div class="image-source-field">
+              <label class="field-label" for="imageFile">Product image <span class="muted">upload a file, or paste a URL below</span></label>
+              <input id="imageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
+              <div id="imagePreview" class="image-preview" hidden>
+                <img id="imagePreviewImg" alt="" />
+                <button id="clearImageBtn" type="button" class="btn-link">Clear</button>
+              </div>
               <input id="imageUrl" placeholder="https://images.unsplash.com/..." />
+              <p id="imageHint" class="muted small"></p>
             </div>
           </div>
 

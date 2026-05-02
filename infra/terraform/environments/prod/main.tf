@@ -330,6 +330,42 @@ module "irsa_invoice_worker" {
   policy_json          = data.aws_iam_policy_document.invoice_worker.json
 }
 
+# ----------------------------------------------------------------------------
+# Product images bucket -- single shared bucket fronted by CloudFront. Admin
+# console uploads images here; storefront renders them via the CF domain.
+# ----------------------------------------------------------------------------
+module "s3_product_images" {
+  source = "../../modules/s3_product_images"
+
+  name        = "shopcloud"
+  bucket_name = "shopcloud-product-images-${data.aws_caller_identity.current.account_id}"
+}
+
+# IRSA -- admin pod can write to the product images bucket. Same role serves
+# both prod and dev namespaces (one bucket, both envs upload here).
+data "aws_iam_policy_document" "admin" {
+  statement {
+    sid    = "WriteProductImages"
+    actions = [
+      "s3:PutObject",
+      "s3:PutObjectAcl",
+      "s3:DeleteObject",
+    ]
+    resources = ["${module.s3_product_images.bucket_arn}/*"]
+  }
+}
+
+module "irsa_admin" {
+  source = "../../modules/iam_irsa"
+
+  role_name            = "shopcloud-admin"
+  namespaces           = ["prod", "dev"]
+  service_account_name = "admin"
+  oidc_provider_arn    = module.eks.oidc_provider_arn
+  oidc_provider_url    = module.eks.oidc_provider_url
+  policy_json          = data.aws_iam_policy_document.admin.json
+}
+
 # ============================================================================
 # IDENTITY — Cognito user pools (customers + admins)
 # ============================================================================

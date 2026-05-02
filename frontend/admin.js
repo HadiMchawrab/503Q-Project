@@ -71,6 +71,28 @@ async function api(path, options = {}) {
   return data;
 }
 
+// Multipart upload -- bypasses rawFetch because that helper hardcodes
+// Content-Type: application/json which would break the multipart boundary.
+// Browser sets the boundary automatically when you pass a FormData body and
+// omit the Content-Type header.
+async function uploadProductImage(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const send = () => fetch('/api/admin/products/upload', {
+    method: 'POST',
+    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+    body: form,
+  });
+  let response = await send();
+  if (response.status === 401 && state.refreshToken) {
+    const refreshed = await tryRefresh();
+    if (refreshed) response = await send();
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || 'Upload failed');
+  return data.image_url;
+}
+
 function setButtonLoading(button, isLoading, loadingText = 'Processing...') {
   if (!button) return;
   if (isLoading) {
@@ -372,6 +394,35 @@ function fillSampleProduct() {
   showMessage('Sample product filled. Click Add item to create it.', 'notice');
 }
 
+function clearImageSelection() {
+  const fileInput = $('imageFile');
+  if (fileInput) fileInput.value = '';
+  const preview = $('imagePreview');
+  const previewImg = $('imagePreviewImg');
+  if (preview && previewImg) {
+    preview.hidden = true;
+    if (previewImg.src.startsWith('blob:')) URL.revokeObjectURL(previewImg.src);
+    previewImg.src = '';
+  }
+  const hint = $('imageHint');
+  if (hint) hint.textContent = '';
+}
+
+function showImagePreview(file) {
+  const preview = $('imagePreview');
+  const previewImg = $('imagePreviewImg');
+  if (!preview || !previewImg) return;
+  if (previewImg.src.startsWith('blob:')) URL.revokeObjectURL(previewImg.src);
+  previewImg.src = URL.createObjectURL(file);
+  preview.hidden = false;
+  // The URL field becomes a fallback only when no file is chosen. Disable it
+  // visually so it's clear the upload takes precedence.
+  const urlInput = $('imageUrl');
+  if (urlInput) urlInput.value = '';
+  const hint = $('imageHint');
+  if (hint) hint.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+}
+
 function setupEvents() {
   $('adminLoginBtn')?.addEventListener('click', startLogin);
   $('localAdminLoginBtn')?.addEventListener('click', () => localAdminLogin().catch((error) => showMessage(error.message, 'error')));
@@ -382,10 +433,32 @@ function setupEvents() {
   $('orderStatusFilter').addEventListener('change', () => loadOrders().catch((error) => showMessage(error.message, 'error')));
   $('sampleProductBtn').addEventListener('click', fillSampleProduct);
 
+  $('imageFile')?.addEventListener('change', (event) => {
+    const file = event.target.files?.[0];
+    if (file) showImagePreview(file);
+    else clearImageSelection();
+  });
+  $('clearImageBtn')?.addEventListener('click', clearImageSelection);
+
   $('createProductBtn').addEventListener('click', async () => {
     const button = $('createProductBtn');
     try {
       validateProductForm();
+      setButtonLoading(button, true, 'Adding...');
+
+      // If a file is chosen, upload it first; the returned CloudFront URL
+      // becomes the imageUrl. Otherwise fall back to the typed URL field
+      // (or the default placeholder if both are empty).
+      const file = $('imageFile')?.files?.[0];
+      let imageUrl = $('imageUrl').value.trim();
+      if (file) {
+        setButtonLoading(button, true, 'Uploading image...');
+        imageUrl = await uploadProductImage(file);
+      }
+      if (!imageUrl) {
+        imageUrl = 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3';
+      }
+
       setButtonLoading(button, true, 'Adding...');
       await api('/api/admin/products', {
         method: 'POST',
@@ -395,11 +468,12 @@ function setupEvents() {
           category: $('category').value.trim(),
           price: $('price').value.trim(),
           stock: Number($('stock').value),
-          imageUrl: $('imageUrl').value.trim() || 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3',
+          imageUrl,
           description: $('description').value.trim()
         })
       });
       ['sku', 'name', 'category', 'price', 'stock', 'imageUrl', 'description'].forEach((id) => { $(id).value = ''; });
+      clearImageSelection();
       showMessage('Item added to the catalog and storefront.', 'success');
       await Promise.all([loadProducts(), loadSummary(), loadLowStock()]);
       $('inventorySection')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
