@@ -22,3 +22,6 @@ terraform.tfvars
 terraform.tfvars.json
 *.auto.tfvars
 *.auto.tfvars.json
+
+shopcloud-vpn-hadi.ovpn
+shopcloud-vpn-base.ovpn
